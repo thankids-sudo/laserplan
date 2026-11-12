@@ -1,0 +1,139 @@
+# Builds an installable Android APK of LaserPlan GLM as a Trusted Web Activity (TWA).
+# The APK opens https://thankids-sudo.github.io/laserplan/ in Chrome's engine, so Web Bluetooth (Bosch GLM)
+# and WebXR AR keep working. A plain WebView wrapper would NOT support Web Bluetooth.
+# Run it from: Actions → "Build Android APK" → Run workflow. Download the APK from the run's Artifacts.
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Version name shown in Android (e.g. 8.2.1)"
+        default: "8.2.1"
+      version_code:
+        description: "Version code (whole number, increase for every new APK)"
+        default: "821"
+
+env:
+  HOST: thankids-sudo.github.io
+  START_PATH: /laserplan/
+  PACKAGE_ID: io.github.thankids_sudo.laserplan
+  KEY_ALIAS: laserplan
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check the website is live
+        run: |
+          curl -fsS "https://${HOST}${START_PATH}manifest.webmanifest" > /dev/null \
+            || { echo "::error::https://${HOST}${START_PATH} is not live yet. Switch on Settings → Pages first."; exit 1; }
+
+      - name: Install Bubblewrap and point it at the runner's JDK and Android SDK
+        run: |
+          npm install -g @bubblewrap/cli
+          mkdir -p ~/.bubblewrap
+          echo "{\"jdkPath\":\"${JAVA_HOME}\",\"androidSdkPath\":\"${ANDROID_HOME}\"}" > ~/.bubblewrap/config.json
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Signing key (saved key from secrets, or a new one)
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p twa out
+          if [ -n "$KS_B64" ] && [ -n "$KS_PW" ]; then
+            echo "$KS_B64" | base64 -d > twa/android.keystore
+            PW="$KS_PW"; echo "Using the saved signing key from repository secrets."
+          else
+            PW="$(openssl rand -hex 16)"
+            keytool -genkeypair -keystore twa/android.keystore -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PW" -keypass "$PW" -dname "CN=LaserPlan GLM, O=JAU Junagadh, C=IN"
+            base64 -w0 twa/android.keystore > out/KEYSTORE_BASE64.txt
+            echo "$PW" > out/KEYSTORE_PASSWORD.txt
+            echo "::warning::New signing key created. Save it as repository secrets (see out/HOW-TO-KEEP-THIS-KEY.txt) so later APKs install as updates."
+            printf '%s\n' "Settings → Secrets and variables → Actions → New repository secret:" \
+              "  KEYSTORE_BASE64   = contents of KEYSTORE_BASE64.txt" \
+              "  KEYSTORE_PASSWORD = contents of KEYSTORE_PASSWORD.txt" \
+              "Then delete this artifact. Anyone holding these two files can sign apps as you." > out/HOW-TO-KEEP-THIS-KEY.txt
+          fi
+          echo "PW=$PW" >> "$GITHUB_ENV"
+          echo "::add-mask::$PW"
+
+      - name: Write twa-manifest.json
+        run: |
+          cat > twa/twa-manifest.json <<JSON
+          {
+            "packageId": "${PACKAGE_ID}",
+            "host": "${HOST}",
+            "name": "LaserPlan GLM",
+            "launcherName": "LaserPlan",
+            "display": "standalone",
+            "orientation": "any",
+            "themeColor": "#0B1828",
+            "navigationColor": "#0B1828",
+            "navigationColorDark": "#0B1828",
+            "navigationDividerColor": "#0B1828",
+            "navigationDividerColorDark": "#0B1828",
+            "backgroundColor": "#0B1828",
+            "enableNotifications": false,
+            "startUrl": "${START_PATH}",
+            "iconUrl": "https://${HOST}${START_PATH}icon-512.png",
+            "maskableIconUrl": "https://${HOST}${START_PATH}icon-512.png",
+            "splashScreenFadeOutDuration": 300,
+            "signingKey": { "path": "./android.keystore", "alias": "${KEY_ALIAS}" },
+            "appVersionName": "${{ github.event.inputs.version_name }}",
+            "appVersionCode": ${{ github.event.inputs.version_code }},
+            "shortcuts": [],
+            "generatorApp": "bubblewrap-cli",
+            "webManifestUrl": "https://${HOST}${START_PATH}manifest.webmanifest",
+            "fallbackType": "customtabs",
+            "features": {},
+            "alphaDependencies": { "enabled": false },
+            "enableSiteSettingsShortcut": true,
+            "isChromeOSOnly": false,
+            "isMetaQuest": false,
+            "fullScopeUrl": "https://${HOST}${START_PATH}",
+            "minSdkVersion": 21,
+            "fingerprints": [],
+            "additionalTrustedOrigins": [],
+            "retainedBundles": []
+          }
+          JSON
+          cat twa/twa-manifest.json
+
+      - name: Generate the Android project and build the signed APK
+        working-directory: twa
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ env.PW }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ env.PW }}
+        run: |
+          bubblewrap update --skipVersionUpgrade
+          bubblewrap build --skipPwaValidation
+          cp app-release-signed.apk "../out/LaserPlan-GLM-${{ github.event.inputs.version_name }}.apk"
+          cp app-release-bundle.aab "../out/LaserPlan-GLM-${{ github.event.inputs.version_name }}.aab" || true
+
+      - name: assetlinks.json (removes the browser address bar inside the app)
+        run: |
+          FP=$(keytool -list -v -keystore twa/android.keystore -alias "$KEY_ALIAS" -storepass "$PW" | sed -n 's/.*SHA256: *//p' | head -1)
+          cat > out/assetlinks.json <<JSON
+          [{"relation":["delegate_permission/common.handle_all_urls"],
+            "target":{"namespace":"android_app","package_name":"${PACKAGE_ID}","sha256_cert_fingerprints":["${FP}"]}}]
+          JSON
+          echo "Signing certificate SHA-256: $FP"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LaserPlan-GLM-APK-${{ github.event.inputs.version_name }}
+          path: out/
+          retention-days: 3
