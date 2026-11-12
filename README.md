@@ -260,6 +260,8 @@ Open **Menu → Room shape from AR or 3D scan…**, the **AR/Scan** button in th
    * Export the scan as OBJ from your scanning app, then choose the up axis (Y for ARKit-based apps), the units and the cut height (0.7 m by default: below window sills, above beds and tables).
    * The mesh is cut horizontally and the outline traced. Gaps up to 1.5 m (doors, unscanned glass) are bridged, small closed loops (furniture) are ignored, and the largest outline becomes the room. Room height = mesh height range.
 
+**Installed APK and AR:** on a real phone the AR session started inside the installed app, but the camera picture stayed black, while the same page in Chrome worked. So inside the app, **Start AR** opens LaserPlan in Chrome with the capture screen ready. After **Finish**, switch back to the app: it reloads the project when it comes to the front and shows the new room, because the app and Chrome share this website's storage. **Try here anyway** still attempts AR inside the app.
+
 **Result:** a new room whose walls are **estimates (≈)**, marked `src: AR` or `src: scan`. Corners within 1.5° of square are squared up to remove AR noise; larger skews are kept, so the laser guide then asks for a diagonal. The raw capture (points, source, file, cut height) is saved on the room as `capture`. If a laser session is connected, W1 is armed straight away, so the laser confirms and locks each wall.
 
 **What runs where (checked November 2026)**
@@ -285,6 +287,198 @@ Open **Menu → Room shape from AR or 3D scan…**, the **AR/Scan** button in th
 * caniuse, WebXR Device API: https://caniuse.com/webxr
 * WebKit bug 208988 (WebXR in WebKit): https://bugs.webkit.org/show_bug.cgi?id=208988
 * Apple, RoomPlan: https://developer.apple.com/augmented-reality/roomplan
+
+## 3H. Android APK (built by GitHub Actions)
+The APK is a Trusted Web Activity: it opens the https site using Chrome's engine, so the Bosch Bluetooth link and AR keep working. A WebView wrapper would lose Bluetooth.
+Workflow file: `.github/workflows/build-apk.yml`; step-by-step guide: `APK-HOW-TO.md`. Run **Actions → Build Android APK → Run workflow** and download the APK from the run's Artifacts.
+
+## 3I. Version 9: whole floor plan, doors and windows, stairs, slabs, electrical layout
+
+Everything below starts from the **＋ Add** button at the top right of the plan, in Edit mode.
+
+**Whole floor in one plan**
+* All rooms of the floor are drawn together, with their wall thickness and lengths. **Tap inside, or on a wall of, any other room** to work on it; the view stays where it is.
+* **Room attached to a wall:** select a wall, then **＋ Add → Room attached to a wall** (or right-click the wall → *Add room on this wall…*). Enter the depth, the width along the wall, the start offset from the corner, the name and the use.
+  * The new room is drawn on the far side of the wall, beyond its thickness.
+  * Both walls are marked *shared*, so masonry is counted ½ in each room.
+  * Its walls start as estimates (≈); measure them with the laser to lock them.
+
+**Doors and windows at their real position**
+* **＋ Add → Door / window**: pick the type (D1, W1 …) and tap the wall. You can place several in one go; **Done** ends.
+* Drag a placed opening along its wall to move it (5 cm steps when Grid is on).
+* Tap it twice to type exact distances: *from corner Cn to the near edge* and *from the far edge to the next corner* (laser-ready fields). Doors also get hinge side and swing direction.
+* Width, height and sill belong to the type, so editing them changes every opening of that type.
+* Each placed opening also counts in the wall's schedule, so masonry, plaster, paint deductions and the door/window schedule follow automatically. Older plans keep their counted, unplaced openings.
+
+**Stairs and stair rooms**
+* **Stair**: tap where it starts. Set straight or dog-legged, floor-to-floor height, maximum riser, tread, flight width, gap, landing and waist slab.
+  * Risers = ⌈height ÷ max riser⌉, split into two flights for dog-legged.
+  * Warnings appear for risers above 190 mm or treads below 250 mm (the NBC 2016 residential limits).
+  * Drag the stair to move it; the arrow and **UP** mark show the direction.
+* **Stair room**: creates a room (use = stair) sized for a dog-legged stair plus a bottom floor landing, with the stair inside it.
+* Estimate items:
+  * *RCC in stair* (waist slab along slope + ½·tread·riser per step + mid landing, m³)
+  * *Shuttering* (soffit, landing, riser faces, m²)
+  * *Finishing* (treads, risers, landing, m²)
+  * *Handrail* (along slope + landing turn, m)
+
+**Slabs**
+* **Slab – tap corners**: corners snap to wall corners. Tap the first corner, or **Finish**, to close.
+* **Slab over rooms…**: one slab per chosen room, out to the outer face of its walls. It can untick "RCC slab over this room" for those rooms, so nothing is counted twice.
+* Types: roof, floor, sunshade/chajja, loft, landing, other; each slab has its own thickness.
+* Estimate: RCC volume per type (m³), and shuttering for soffit and edges (m²).
+
+**Electrical layout and wiring**
+* Place a distribution board (DB), switch boards (SB) and points:
+  * Points: light, fan, LED batten, 6A/16A sockets, AC, geyser, exhaust, bell, TV, data, telephone, CCTV, outdoor light.
+  * Wall items snap to the nearest wall.
+  * Default heights: SB 1.20 m, sockets 0.30 m, AC 2.10 m, DB 1.80 m, lights and fans at the ceiling.
+* Tap an item twice to edit its type, label, height, wiring size and feeder, and its **position: distance along the wall from corner Cn, and out from the wall**. When selected, the plan shows the distances to both corners and the height.
+* **Auto wiring:**
+  * Points connect to the nearest SB in the same room; SBs connect to the nearest DB.
+  * Route = up to ceiling + along the ceiling parallel to the axes + down to the point + 0.30 m. Wire = route × conductors (3 by default).
+  * **＋ Add → Wiring** lists every route and the totals, and re-connects everything on request.
+* Estimate items:
+  * Point wiring rows, short/medium/long chosen from the actual route (≤3 / ≤6 / >6 m)
+  * Switch boards (Nos)
+  * PVC conduit (m)
+  * Wire per size (m)
+  * Points you also entered as counts in the Electrical tab are counted separately, so avoid entering the same point both ways.
+
+**Show / hide:** ＋ Add → Show lets you hide doors/windows, stairs, slabs, electrical, wiring or wire lengths.
+**DXF:** new layers OPENINGS (jambs, door leaves, windows), STAIRS, SLABS, ELECTRICAL and WIRING.
+
+## 3J. Version 10: wall elevations, inside and outside
+
+Open a wall (tap it twice). The wall window now shows the wall as an elevation you can edit.
+
+* **Inside view / Outside view.**
+  * Inside: the wall as seen from inside the room. The corner names (C2, C3 …) show which end is left.
+  * Outside: mirrored, using the **outer-face length** (inner length + wall thickness at the corners) and the height up to the top of the slab. Electrical points are inside items, so they are hidden in this view.
+* **Doors and windows at their positions.** A dimension chain under the wall runs corner → opening edge → opening edge → corner; window sills are dimensioned.
+  * Openings counted in the wall but not yet placed show dashed with "(not placed)". Tap one to place it in the largest free gap.
+  * Drag an opening sideways to move it; drag a window up or down to change its sill. The sill is set for that window only, and the estimate area is unchanged.
+  * Tap an opening to type **From Cx (left)** / **From Cy (right)** and the sill (laser-ready), flip the door hinge and swing, or remove it.
+* **Electrical points on the wall.** Switch boards, sockets, AC, geyser and other wall points appear at their real position and height.
+  * Drag them in both directions.
+  * Tap one to type its distance from either corner, its height, type and label. **Wiring & feeder…** opens the full point settings.
+* **＋ Add on this wall…** puts a door, window or wall point straight into the free space of this wall.
+* Everything you change here also changes the plan, the wiring lengths and the estimate. The counts in the wall window stay in step.
+
+## 3K. Version 11: plumbing, general room items, frame (columns, beams, lintels), 3D corners
+
+**Plumbing – water supply and drainage** (＋ Add → Plumbing)
+* Items:
+  * Supply sources: overhead-tank riser, sump/main inlet.
+  * Fixtures: EWC, IWC, wash basin, kitchen sink, shower, bib tap, health faucet, washing machine, geyser.
+  * Drainage: floor trap (nahani), soil/waste stack with vent cowl, gully trap, inspection chamber, rainwater pipe.
+* Wall items snap to the nearest wall. Stacks and rainwater pipes can sit outside the wall (negative "out from wall").
+* Tap an item to edit its type, label, distance along the wall from a corner, offset from the wall and inlet/outlet height. Wall items also appear in the wall elevation: inside view, or outside view for stacks. Drag them there, or type exact distances.
+* **Predict plumbing for toilets & kitchens** (rooms with use Toilet/bath or Kitchen):
+  * Places the fixtures. The fixture wall is chosen non-shared, external and door-free first, then longest.
+  * Adds a floor trap and a stack (gully trap for a ground-floor kitchen) outside that wall, plus a supply riser within 8 m of each wet room.
+* **Pipes are routed automatically**, parallel to the axes:
+  * *Supply*: every fixture joins the nearest point of the network already connected to a source (shortest-connection tree). Runs are at the supply run height (0.60 m, editable), plus vertical drops to each inlet and the riser drop.
+  * *Drainage*: basin, shower, bath tap, washing machine and sink discharge to a floor trap in the same room. Floor traps and WCs join the tree that ends at a stack, gully trap or inspection chamber. Gradient: 1:40 up to 75 mm, 1:60 for 110 mm; the fall is shown.
+* Pipe sizes come from the fixture units carried by each run:
+  * Supply: ≤3 LU 15 mm, ≤10 LU 20 mm, ≤30 LU 25 mm, ≤70 LU 32 mm. Riser at least 32 mm.
+  * Drainage: any WC downstream → 110 mm, otherwise by DFU (40 / 50 / 75 / 110).
+  * These are **simplified, indicative tables**; check against IS 2065, IS 1742 and NBC 2016 Part 9 before issue.
+* Estimate items:
+  * fixtures (Nos), with their accessories counted separately (angle valves, pillar/sink cocks, bottle/P-traps, waste couplings, ball/gate valves, vent cowl, clean-out, gully and chamber)
+  * CPVC pipe per size (m), including riser
+  * UPVC SWR pipe per size (m), including the stack and its vent above roof
+  * bends and tees/junctions (Nos) counted from the routes
+* **Pipes, sizes & settings…** shows the totals per size and lets you change the run height, drop allowance and vent height.
+* **Concealed or open pipes** (v11.1): set a project default for water-supply pipes and for drain pipes in **Pipes, sizes & settings…**, and override any item in its window or in the wall elevation (Project default / Concealed / Open).
+  * *Concealed water supply* runs in the wall chase at the concealed run height (0.60 m). The estimate adds **cutting chases in masonry and making good** (m).
+  * *Open water supply* runs on the wall surface at the open run height (2.10 m by default, so the vertical drops are longer). The estimate adds **saddle clamps @ 1.0 m** (Nos).
+  * *Concealed drainage* runs under the floor, in a sunken slab or in a shaft. The estimate adds **cutting / making good floor** (m).
+  * *Open drainage* is exposed, at the open drain height (0.15 m). The estimate adds **clamps @ 1.2 m** (Nos).
+  * A stack fixed outside a wall counts as open unless you change it.
+  * Pipe items are split by installation, e.g. *CPVC 15 mm – concealed in wall chase* and *CPVC 15 mm – open on wall surface*.
+  * On the plan, open pipes are drawn dotted / dash-dot and labelled *open*; concealed pipes are labelled *conc.*
+* **Pipe diameter selection** (v11.2):
+  * **Material** – in **Pipes, sizes & settings…** choose the water-supply pipe (CPVC SDR 11 IS 15778, PPR PN16 IS 15801 sized by OD, GI medium IS 1239, UPVC Sch 40 IS 4985) and the drainage pipe (UPVC SWR IS 14735, cast iron IS 3989, HDPE IS 4984). Each offers only the sizes that material is sold in; calculated sizes snap to the nearest available size (e.g. SWR 110 → CI 100, CPVC 15 → PPR 20).
+  * **Minimum diameter** – a project floor for supply and for drainage (e.g. no drain below 75 mm).
+  * **Per-run diameter** – the *Pipe diameters – each run* table in the same window lists every run (from → to, load in LU / DFU, mode, length) with a size dropdown; *Auto* keeps the calculated size. The same dropdowns are in each fixture's window and in the wall-elevation editor (the size applies to the run feeding / draining that item; on a tank or stack it sets the riser / stack).
+  * Choosing a size **smaller than calculated** is allowed but flagged: *!* on the plan label and in the table, and a warning in the item's info line.
+  * The estimate splits pipes by material, installation and diameter, e.g. *PPR PN16 pipe, 25 mm – water supply, concealed in wall chase*; fittings are named after the chosen material.
+
+**General items in this room** (Room tab, below Flooring)
+* Wall putty, primer, OBD distemper, texture paint, white/colour wash, POP punning, gypsum false ceiling, POP cornice, tile dado (height editable), granite kitchen platform (length), dismantling flooring, hacking plaster, IPS/CC flooring, Kota stone, anti-termite, sunken toilet waterproofing (floor + 300 mm upturn), MS window grills, chemical seepage treatment, cleaning/debris, and a lump-sum item (quantity).
+* Quantities are computed live from the room:
+  * walls net of openings
+  * ceiling / floor net of columns
+  * perimeter
+  * (perimeter − doors) × dado height
+  * window area
+
+**Building specification → Frame**
+* Column size (used for new columns), beams over all main walls (width, depth including slab), RCC lintels (depth, bearing each side), plinth beam on ground floor (depth). All three are off by default, so existing estimates do not change until you switch them on.
+* Estimate items:
+  * RCC columns (area × floor height to top of slab)
+  * beams (portion below slab, ½ on shared walls)
+  * lintels (opening width + 2 bearings)
+  * plinth beam
+  * shuttering for columns, beams and lintels
+* Beam and lintel volumes are **deducted from masonry**. Lintels under a beam are skipped.
+* Fix: Save in Building specification read its fields after closing the window, so nothing was saved; it saves correctly now.
+
+**3D view**
+* Walls are now mitred solids, so outer corners close properly (no notches); parapets the same.
+* Placed doors and windows appear at their real positions and sills.
+* Stairs (steps and landing) and drawn slabs are shown.
+
+## 3L. Version 12: kitchen platform and furniture
+
+**Kitchen platform.** Open it from **＋ Add → Kitchen platform in <room>…**, from the button in the Room panel of a kitchen, or by tapping the platform on the plan.
+* Tick the walls it runs along. The app suggests the longest wall without a door plus its longer door-free neighbour (an L shape).
+* Set the depth (default 600 mm), the height of the top (850 mm), and the dado tile height above the top (600 mm).
+* **Top stone:** granite, marble, engineered quartz, Kota or kadappa, 16 / 18 / 20 / 25 / 30 mm thick.
+* **Construction** – the four types and their estimate rows:
+
+  | Type | Base | Supports | Notes |
+  |---|---|---|---|
+  | Kadappa | 25 mm kadappa slab (m²) | Half-brick masonry (m²) | Top stone laid in CM |
+  | RCC | 75 mm RCC slab (m³) | Half-brick masonry (m²) | Top stone laid in CM |
+  | **Sandwich** | 25 mm kadappa base with the top stone epoxy-bonded over it (m²) | Half-brick masonry (m²) | Front edge is double thickness; the edge switches to *double / sandwich* automatically |
+  | Modular | SS 304 frame, front and back rails (m) | None | No masonry |
+
+* **Front edge:** single nosing, double / sandwich edge (40 mm laminated strip), or bullnose. Measured in metres along the front plus the exposed ends at doors.
+* **Cut-outs and extras:**
+  * Sink and hob cut-outs (Nos).
+  * Kadappa shelf under the platform (m²).
+  * Modular shutters under the platform (m², front length × height).
+  * Stone back-splash strip (m).
+* **How it is measured:**
+  * Doors on a ticked wall are deducted, and corners are counted once.
+  * Supports are spaced at 750 mm or less.
+  * The dialog shows the clear walkway between parallel platform runs and flags anything under 900 mm.
+* Drawn hatched on the plan with its size and stone; shown in 3D as a body with a dark (granite) or light (marble / quartz) top.
+
+**Furniture.** In **＋ Add**, choose an item from the Bedroom, Kitchen, Living, Dining or Study group, then tap the plan. Wall items snap with their back to the nearest wall. Drag an item to move it; it slides along the wall and jumps to another wall near a corner. Tap it twice to edit.
+
+| Group | Items (default W × D × H, mm) |
+|---|---|
+| Bedroom | Single 910×1980, double 1370×1980, queen 1520×1980, king 1830×1980 beds; bedside table 450×400×550; hinged wardrobe 1200×600×2100; sliding wardrobe 1800×650×2100; loft 1200×600×600 (bottom at 2100); dresser 900×450×750 |
+| Kitchen | Base cabinets 1200×560×720; wall cabinets 1200×350×700 (bottom at 1450); tall unit 600×560×2100; loft 1200×350×600 |
+| Living | Sofas: 3-seater 2000×850, 2-seater 1550×850, 1-seater 900×850, L-shaped 2600×1700; tipoi / centre table 1000×550×420; TV cabinet 1800×450×450; TV back panel 2100×1200; shoe rack 900×350×900 |
+| Dining | 4-seater 1200×800, 6-seater 1800×900, 8-seater 2100×1000 tables (chairs drawn and counted) |
+| Study | Study table 1200×600×750 with chair; bookshelf / overhead unit 900×300×1800 |
+
+* **Editing an item.** The item window has:
+  * Type, label, width, depth, height, and height of the bottom above the floor.
+  * Distance from the wall corner, or rotation for free-standing items.
+  * Material and a specification note that goes into the estimate.
+  * Rotate 90°, Duplicate (places the copy next to it along the wall) and Delete buttons.
+* **How it is estimated:**
+  * Carpentry items (wardrobes, lofts, kitchen cabinets, TV units and panels, shoe racks, bookshelves, dresser) are measured on face / shutter area in m². This follows the usual per-m² or per-sq-ft carpentry rates.
+  * Carcass: BWP ply IS 710, MR ply IS 303, HDHMR, or pre-laminated particle board IS 12823. Finish: laminate, acrylic, PU or veneer. Set the project default in **Carpentry materials…** and change it per item if needed.
+  * Loose furniture is counted in Nos, with its material (sheesham, teak, engineered wood, fabric, leatherette, or as per approved sample). Beds also have a storage option (none / box / hydraulic). Dining chairs are a separate item.
+* **Show / hide:** the Furniture and Kitchen platform layers are in the **＋ Add** menu.
+
+Sizes were checked against: HouseYog – kitchen platform height, depth and walkway (https://www.houseyog.com/blog/kitchen-platform-height-depth-walkway/); Studio Matrx furniture size chart (https://www.studiomatrx.org/utilities/furniture-size-chart); Stone Galleria granite thickness guide (https://www.stonegalleria.in/granite-thickness-guide/); Comaron kitchen platform stone comparison (https://www.comaron.com/blog/kitchen-platform-stone-comparison-2026). The construction of a "sandwich" platform varies between contractors. The definition above is the common local meaning; edit the item description in the Excel file if your schedule words it differently.
 
 ## 4. Excel workbook
 
