@@ -108,7 +108,7 @@ jobs:
             "isChromeOSOnly": false,
             "isMetaQuest": false,
             "fullScopeUrl": "https://${HOST}${START_PATH}",
-            "minSdkVersion": 21,
+            "minSdkVersion": 24,
             "fingerprints": [],
             "additionalTrustedOrigins": [],
             "retainedBundles": []
