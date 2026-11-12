@@ -39,19 +39,16 @@ jobs:
           curl -fsS "https://${HOST}${START_PATH}manifest.webmanifest" > /dev/null \
             || { echo "::error::https://${HOST}${START_PATH} is not live yet. Switch on Settings → Pages first."; exit 1; }
 
-      - name: Install Bubblewrap and prepare the runner's JDK 17 and Android SDK
+      - name: Install Bubblewrap (project generator) and accept Android SDK licences
         run: |
+          set -x
           npm install -g @bubblewrap/cli@1.27.0
-          SDK="$ANDROID_HOME"; SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SM" --licenses > /dev/null || true
-          # Bubblewrap 1.27.0 builds with build-tools 36.1.0 and Android 36; install them now so it never stops to ask.
-          "$SM" --install "build-tools;36.1.0" "platforms;android-36" > /dev/null
-          # Bubblewrap looks for <sdk>/bin/sdkmanager (or <sdk>/tools). The runner only has cmdline-tools/latest/bin.
-          [ -e "$SDK/bin" ] || ln -s "$SDK/cmdline-tools/latest/bin" "$SDK/bin" || sudo ln -s "$SDK/cmdline-tools/latest/bin" "$SDK/bin"
+          "$SM" --install "platforms;android-36" "build-tools;35.0.0" > /dev/null || echo "::warning::sdkmanager pre-install failed; Gradle will try to download what it needs."
           mkdir -p ~/.bubblewrap
-          echo "{\"jdkPath\":\"${JAVA_HOME}\",\"androidSdkPath\":\"${SDK}\"}" > ~/.bubblewrap/config.json
-          cat ~/.bubblewrap/config.json
-          bubblewrap doctor || true
+          echo "{\"jdkPath\":\"${JAVA_HOME}\",\"androidSdkPath\":\"${ANDROID_HOME}\"}" > ~/.bubblewrap/config.json
+          java -version
 
       - name: Signing key (saved key from secrets, or a new one)
         env:
@@ -119,16 +116,27 @@ jobs:
           JSON
           cat twa/twa-manifest.json
 
-      - name: Generate the Android project and build the signed APK
+      - name: Generate the Android project (Bubblewrap)
         working-directory: twa
-        env:
-          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ env.PW }}
-          BUBBLEWRAP_KEY_PASSWORD: ${{ env.PW }}
         run: |
           bubblewrap update --skipVersionUpgrade < /dev/null
-          bubblewrap build --skipPwaValidation < /dev/null
-          cp app-release-signed.apk "../out/LaserPlan-GLM-${{ github.event.inputs.version_name }}.apk"
-          cp app-release-bundle.aab "../out/LaserPlan-GLM-${{ github.event.inputs.version_name }}.aab" || true
+          ls -la
+
+      - name: Build the APK with Gradle
+        working-directory: twa
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Align and sign the APK
+        working-directory: twa
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1); echo "Using $BT"
+          IN=$(ls app/build/outputs/apk/release/*.apk | head -1); echo "Gradle output: $IN"
+          "$BT/zipalign" -f -p 4 "$IN" aligned.apk
+          "$BT/apksigner" sign --ks android.keystore --ks-key-alias "$KEY_ALIAS" --ks-pass env:PW --key-pass env:PW \
+            --out "../out/LaserPlan-GLM-${{ github.event.inputs.version_name }}.apk" aligned.apk
+          "$BT/apksigner" verify --print-certs "../out/LaserPlan-GLM-${{ github.event.inputs.version_name }}.apk"
 
       - name: assetlinks.json (removes the browser address bar inside the app)
         run: |
