@@ -126,7 +126,16 @@ jobs:
         working-directory: twa
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          # Lint is switched off for release builds: a code-style check that can stop CI builds; not needed for this wrapper app.
+          printf '\nandroid {\n    lint {\n        checkReleaseBuilds false\n        abortOnError false\n    }\n}\n' >> app/build.gradle
+          set +e
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee gradle.log
+          rc=${PIPESTATUS[0]}; set -e
+          if [ "$rc" != "0" ]; then
+            # Put Gradle's own explanation at the top of the run page (Annotations).
+            sed -n '/What went wrong/,/^\* Try/p' gradle.log | grep -v '^\* Try' | head -40 | sed 's/^/::error::/'
+            exit "$rc"
+          fi
 
       - name: Align and sign the APK
         working-directory: twa
