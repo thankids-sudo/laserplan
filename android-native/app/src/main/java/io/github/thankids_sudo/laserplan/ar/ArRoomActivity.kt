@@ -62,7 +62,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     private class CapturedCorner(val anchor: Anchor, val source: String, val timeMs: Long)
 
     private lateinit var surface: GLSurfaceView
-    private lateinit var overlay: ArOverlayView
+    private lateinit var arOverlay: ArOverlayView
     private lateinit var status: TextView
     private lateinit var floorBar: LinearLayout
     private lateinit var heightBar: LinearLayout
@@ -107,7 +107,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             setRenderer(this@ArRoomActivity)
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
         }
-        overlay = ArOverlayView(this)
+        arOverlay = ArOverlayView(this)
         status = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 15f; setBackgroundColor(Color.parseColor("#AA0B1220"))
             setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
@@ -123,7 +123,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(floorBar); addView(heightBar) }
         setContentView(FrameLayout(this).apply {
             addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(arOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
             addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         })
@@ -213,7 +213,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             if (wasTracking) trackingLosses++
             wasTracking = false
             say(trackingMessage(cam.trackingFailureReason))
-            overlay.state = OverlayState(heightMode = heightMode)
+            arOverlay.state = OverlayState(heightMode = heightMode)
             return
         }
         wasTracking = true
@@ -238,7 +238,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             val p = hit.first.hitPose; val l = poses.last()
             hypot((p.tx() - l.tx()).toDouble(), (p.tz() - l.tz()).toDouble())
         } else if (heightMode && hit != null && floorY != null) (hit.first.hitPose.ty() - floorY!!).toDouble() else null
-        overlay.state = OverlayState(poses.map { project(it.tx(), it.ty(), it.tz()) }, lengths, hit != null, live, heightMode)
+        arOverlay.state = OverlayState(poses.map { project(it.tx(), it.ty(), it.tz()) }, lengths, hit != null, live, heightMode)
     }
 
     private fun project(x: Float, y: Float, z: Float): FloatArray? {
@@ -303,7 +303,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     private fun deleteNearCentre() = actions.add { _ ->
-        val pts = overlay.state.corners
+        val pts = arOverlay.state.corners
         val cx = viewW / 2f; val cy = viewH / 2f
         val limit = 60 * resources.displayMetrics.density
         val i = pts.indices.filter { pts[it] != null }.minByOrNull { hypot(pts[it]!![0] - cx, pts[it]!![1] - cy) }
