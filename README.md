@@ -487,6 +487,7 @@ The native Kotlin app is in `android-native/`; see `android-native/README.md` fo
 * Laser meters connect through native Bluetooth: Bosch MT protocol, Leica DISTO, keyboard mode, and an experimental Classic SPP mode.
 * The web app gained a small bridge (`window.LPNative`) that does nothing in a normal browser.
 * Native ARCore room capture works inside the app: tap the floor corners, set or type the height, and the room arrives in the plan as AR estimates for laser confirmation (v13.1).
+* 3D survey recording (v13.2): **Record 3D / Stop 3D / View 3D / Export ZIP** on the AR screen record ARCore raw depth, confidence, poses and RGB keyframes. The app shows a rotatable point-cloud preview and exports a documented survey ZIP.
 
 ## 4. Excel workbook
 
