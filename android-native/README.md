@@ -10,7 +10,7 @@ the installed 12.0 app, so the release APK installs as an update.
 | Drawing, CAD, rooms, plumbing, electrical, furniture, estimates, Excel/DXF/JSON export | The existing web engine (`index.html` at the repository root) bundled into the APK and served from `https://appassets.androidplatform.net/assets/www/` by `WebViewAssetLoader`. Works offline. |
 | Bluetooth laser meters | Native Android Bluetooth (BLE GATT, Classic RFCOMM/SPP, keyboard/HID) – no Web Bluetooth |
 | Saving exported files | Android "Save as" (Storage Access Framework) |
-| AR room capture | **Not yet native** – Phase 3 (ARCore). Until then the AR button shows a notice; AR simulation and OBJ import still work. |
+| AR room capture | Native ARCore (`ar/ArRoomActivity`), optional: phones without ARCore still use manual drawing and the laser |
 
 The web app talks to native code only through one message channel, `window.LPNative`
 (`androidx.webkit` WebMessageListener, allowed origin `https://appassets.androidplatform.net`, main frame only).
@@ -24,6 +24,30 @@ Readings enter the web app through the same `lzReading()` path as before. That p
 duplicate, conflict and lock rules, so a reading is applied only to the wall that is armed when it arrives. Readings
 are sent to the plan only while the plan is on screen. A reading taken while the Laser meters screen is open is
 shown there as a test reading and never queued for later.
+
+## Native AR room capture (ARCore)
+
+Open it from **Capture room shape → Start AR** in the plan. It runs the camera inside the app (GLSurfaceView + ARCore), not in Chrome.
+1. Move the phone over the floor until ARCore finds the floor plane.
+2. Aim the centre reticle at each floor corner and tap **Add corner**. Corners are anchored and labelled C1, C2…, and live wall lengths are shown.
+   - Only hits on the first floor plane are accepted: an upward-facing plane, or a depth point at that floor height (±8–12 cm).
+3. Edit corners as needed:
+   - **Undo** removes the last corner.
+   - **Delete point** removes the corner under the reticle.
+   - To move a point, delete it and add it again.
+4. For the room height, tap **Height** and aim at the ceiling, then **Set height**. If the ceiling is too plain for AR, use **Type height**.
+5. Tap **Finish**. It is blocked when there are fewer than 3 corners, corners under 5 cm apart, crossing walls, or an area under 0.5 m².
+
+The result is a versioned JSON payload `laserplan.ar-room` v1 (`geometry/RoomGeometry.kt`). It holds:
+- the plan points in metres;
+- the raw 3D corners, with their source (plane or depth) and time;
+- the floor height, and the room height with its source (`ar-ceiling-plane`, `ar-ceiling-depth`, `ar-ceiling-point` or `manual`);
+- whether the Depth API was used, and how many times tracking was lost;
+- wall, angle, area and perimeter metrics.
+
+The web engine checks the payload, then builds the room with the same `capToRoom()` used by WebXR. Its walls are marked **AR (≈ estimate)** until measured with the laser, and the raw capture is kept in `room.capture.native`.
+
+Phone AR is sketch-grade. Treat AR lengths as estimates until they are confirmed with the laser.
 
 ## Universal Laser Connectivity Engine (ULCE)
 

@@ -43,8 +43,8 @@ android {
         applicationId = "io.github.thankids_sudo.laserplan"
         minSdk = 24
         targetSdk = 36
-        versionCode = (System.getenv("VERSION_CODE") ?: "1300").toInt()
-        versionName = System.getenv("VERSION_NAME") ?: "13.0"
+        versionCode = (System.getenv("VERSION_CODE") ?: "1310").toInt()
+        versionName = System.getenv("VERSION_NAME") ?: "13.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -103,6 +103,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("com.google.ar:core:1.45.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

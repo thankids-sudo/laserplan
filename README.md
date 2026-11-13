@@ -486,7 +486,7 @@ The native Kotlin app is in `android-native/`; see `android-native/README.md` fo
 * It runs this same web engine offline inside the app.
 * Laser meters connect through native Bluetooth: Bosch MT protocol, Leica DISTO, keyboard mode, and an experimental Classic SPP mode.
 * The web app gained a small bridge (`window.LPNative`) that does nothing in a normal browser.
-* Native ARCore room capture is the next phase.
+* Native ARCore room capture works inside the app: tap the floor corners, set or type the height, and the room arrives in the plan as AR estimates for laser confirmation (v13.1).
 
 ## 4. Excel workbook
 
