@@ -24,6 +24,7 @@ import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import io.github.thankids_sudo.laserplan.ar.ArRoomActivity
 import io.github.thankids_sudo.laserplan.bridge.APP_ORIGIN
 import io.github.thankids_sudo.laserplan.bridge.Bridge
 import io.github.thankids_sudo.laserplan.bridge.START_URL
@@ -66,6 +67,12 @@ class MainActivity : AppCompatActivity() {
             }
             post(Bridge.saved(s.name, err == null, err?.message))
         }
+    }
+
+    private val arRoom = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val json = res.data?.getStringExtra(ArRoomActivity.EXTRA_ROOM)
+        if (res.resultCode == RESULT_OK && json != null) post(json)
+        else post(Bridge.toast("AR capture closed – nothing was added."))
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -148,6 +155,7 @@ class MainActivity : AppCompatActivity() {
             WebCommand.LaserOpen -> startActivity(Intent(this, LaserActivity::class.java))
             WebCommand.LaserReconnect -> if (!LaserManager.reconnectPreferred()) startActivity(Intent(this, LaserActivity::class.java))
             WebCommand.LaserDisconnect -> LaserManager.disconnect()
+            WebCommand.ArOpen -> arRoom.launch(Intent(this, ArRoomActivity::class.java))
             is WebCommand.Save -> {
                 pendingSave = cmd
                 val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)

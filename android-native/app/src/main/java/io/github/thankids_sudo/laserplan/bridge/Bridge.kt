@@ -15,6 +15,7 @@ sealed class WebCommand {
     data object LaserOpen : WebCommand()
     data object LaserReconnect : WebCommand()
     data object LaserDisconnect : WebCommand()
+    data object ArOpen : WebCommand()
     data class Save(val name: String, val mime: String, val base64: String) : WebCommand()
 }
 
@@ -32,6 +33,7 @@ object Bridge {
             "laser.open" -> WebCommand.LaserOpen
             "laser.reconnect" -> WebCommand.LaserReconnect
             "laser.disconnect" -> WebCommand.LaserDisconnect
+            "ar.open" -> WebCommand.ArOpen
             "save" -> {
                 val name = o.optString("name").trim().replace(Regex("""[^\w\-. ()\[\]]"""), "_").take(120)
                 val mime = o.optString("mime", "application/octet-stream")

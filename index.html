@@ -2973,7 +2973,7 @@ function capToRoom(pts,opt){ opt=opt||{}; let p=pts.map(q=>({x:arRound(q.x),y:ar
   if(opt.height>1.8&&opt.height<8) r.height=+opt.height.toFixed(3);
   r.capture={src:opt.src,t:Date.now(),pts:pts.map(q=>[arRound(q.x),arRound(q.y)]),snap,height:opt.height!=null?+opt.height.toFixed(3):null,file:opt.file||null,cut:opt.cut||null};
   mutate(()=>{ P.rooms.push(r); P.cur=P.rooms.length-1; S.sel=-1; }); setMode('edit'); fit();
-  const nm={webxr:'AR',sim:'AR simulation',obj:'3D scan'}[opt.src]||'capture';
+  const nm={webxr:'AR',arcore:'native AR',sim:'AR simulation',obj:'3D scan'}[opt.src]||'capture';
   toast(`${r.name} created from ${nm}: ${r.walls.length} walls (≈ estimates), ${fmtArea(polyArea(r))}${r.capture.height?', height '+fmt(r.height):''}. Measure the walls with the laser to confirm and lock them.`);
   if(LZ.session&&LZ.state==='on') setTimeout(()=>lzLaser(0),400);
   if(S.fromApp) setTimeout(()=>toast('Room saved. Switch back to the LaserPlan app: it will show this room.'),3600);
@@ -3949,8 +3949,19 @@ function natOn(m){ if(!m||typeof m!=='object') return;
     if(!LZ.meter||LZ.meter.kind!=='native') natState({state:'on',device:m.device||'Laser'});
     const src='laser:'+String(m.adapter||'native').slice(0,40), mm=+m.m;
     if(lzWants(src)) lzReading({v,u,src}); else if(mm>0&&isFinite(mm)) onDistanceLegacy(mm,src); }
+  else if(m.type==='ar.room') natArRoom(m);
   else if(m.type==='toast'&&m.text) toast(String(m.text).slice(0,300));
   else if(m.type==='saved') toast(m.ok?`Saved ${m.name||'file'}.`:`Not saved${m.error?': '+m.error:''}.`); }
+/* Native ARCore result ("laserplan.ar-room" v1): validate, then build the room through the same capToRoom() as WebXR. */
+function natArRoom(m){ const ok=m.schema==='laserplan.ar-room'&&m.version===1&&Array.isArray(m.plan)&&m.plan.length>=3&&m.plan.length<=64
+    &&m.plan.every(q=>q&&isFinite(q.x)&&isFinite(q.y)&&Math.abs(q.x)<500&&Math.abs(q.y)<500);
+  if(!ok){ toast('AR result ignored: it was not a valid room outline.'); return null; }
+  const h=isFinite(m.height)&&m.height>1.8&&m.height<8?+m.height:null;
+  const r=capToRoom(m.plan.map(q=>({x:+q.x,y:+q.y})),{src:'arcore',height:h}); if(!r) return null;
+  mutate(()=>{ r.capture.native={schema:m.schema,version:m.version,captureTime:+m.captureTime||Date.now(),heightSource:h?String(m.heightSource||'ar').slice(0,20):null,
+    depthUsed:!!m.depthUsed,trackingLosses:+m.trackingLosses||0,corners3d:(Array.isArray(m.corners)?m.corners:[]).slice(0,64).map(c=>[+c.x,+c.y,+c.z,String(c.src||'').slice(0,16)]),
+    metrics:m.metrics&&typeof m.metrics==='object'?{area:+m.metrics.area||0,perimeter:+m.metrics.perimeter||0}:null}; });
+  return r; }
 function natInit(){ const L=window.LPNative; NAT.on=!!(L&&typeof L.postMessage==='function'); if(!NAT.on) return;
   L.onmessage=ev=>{ let m=null; try{ m=JSON.parse(ev.data); }catch(_){ return; } natOn(m); };
   document.documentElement.classList.add('native');
@@ -3964,8 +3975,8 @@ function natInit(){ const L=window.LPNative; NAT.on=!!(L&&typeof L.postMessage==
   download=function(name,blob){ const fr=new FileReader(); fr.onload=()=>{ const s=String(fr.result), b64=s.slice(s.indexOf(',')+1);
       if(!natSend({cmd:'save',name:String(name).replace(/[\\/:*?"<>|]+/g,'_').slice(0,120),mime:blob.type||'application/octet-stream',b64})) toast('Could not hand the file to Android.'); };
     fr.onerror=()=>toast('Could not read the file to save.'); fr.readAsDataURL(blob); };
-  const arMsg=()=>toast('Native AR room capture arrives in the next update. Meanwhile use AR simulation, OBJ scan import or the laser.');
-  arStart=async function(force){ if(force==='sim') return; arMsg(); }; arHandoff=function(){ arMsg(); };
+  arSupported=async function(){ return true; }; arOrigin=function(){ return {pr:'https:',https:true,label:'LaserPlan app'}; };
+  arStart=async function(){ natSend({cmd:'ar.open'}); }; arHandoff=function(){ natSend({cmd:'ar.open'}); };
   window.lpNativeBack=()=>{ if($('dlgRoot').innerHTML){ closeDialog(); return 'handled'; } if(document.querySelector('.ov.show,#arOv.show')){ try{ arClose&&arClose(); }catch(_){} return 'handled'; } return 'exit'; };
   natSend({cmd:'hello',v:13}); NAT.hello=true; }
 
