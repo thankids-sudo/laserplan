@@ -49,6 +49,47 @@ The web engine checks the payload, then builds the room with the same `capToRoom
 
 Phone AR is sketch-grade. Treat AR lengths as estimates until they are confirmed with the laser.
 
+## 3D survey recording (v13.2, milestone 1)
+
+These controls are on the AR screen, above the corner-capture buttons, and were added without removing any existing control.
+
+| Control | What it does |
+|---|---|
+| **● Record 3D** | Starts a session. If the phone has no ARCore Raw Depth, it says so and records nothing; no depth is ever invented. |
+| **■ Stop 3D** | Stops safely. Frames still being saved are finished, then the processed cloud and manifest are written. |
+| **View 3D** | Opens the point-cloud viewer. |
+| **Export ZIP** | Saves the session with Android's Save-as screen. No storage permission is needed and nothing is uploaded. |
+
+**How keyframes are recorded**
+- Rate: about 1 keyframe per second, at most 90 per session.
+- Frames are taken only while ARCore is tracking. After tracking returns, recording waits 0.7 s before the next frame.
+- What each keyframe holds:
+  - a 16-bit raw depth image, in millimetres along the camera's optical axis;
+  - an 8-bit confidence image;
+  - the camera sensor pose (`Camera.getPose`);
+  - camera texture intrinsics, plus the same intrinsics scaled to the depth image size;
+  - the depth and camera timestamps;
+  - an RGB JPEG on every 3rd keyframe.
+- The AR render thread only copies image buffers. JPEG encoding, unprojection, voxel reduction and all file writes run on one background thread.
+- When that thread is 4 frames behind, new frames are skipped and counted, so memory stays bounded.
+
+**How depth becomes points** (`survey/DepthMath.kt`)
+- Each pixel is converted with: x = (u−cx)·z/fx, y = −(v−cy)·z/fy, camera point = (x, y, −z).
+- The camera point is then moved into ARCore world space by the pose matrix.
+- Points are rejected for: zero depth, confidence below 128/255, range over 5 m, or non-finite values.
+- A frame whose depth and pose timestamps differ by more than 50 ms keeps its raw files but adds no points (marked `valid:false`).
+- Accepted points are averaged into 2 cm voxels, with a cap of 600,000 voxels. The viewer shows up to 40,000 points.
+- Every limit above is a constant in `SurveyConfig`, and is written into each manifest.
+
+**Viewer:** drag to rotate, pinch to zoom, double-tap to reset. Points are coloured by height and an XYZ axis marker is shown. With no data it shows an empty-state message. It displays measured points only; it is not a mesh or a BIM model.
+
+**ZIP layout** (`laserplan.ar-survey` v1): `manifest.json`, `frames/NNNN.json`, `depth/NNNN.raw16le`, `confidence/NNNN.raw8`, `rgb/NNNN.jpg`, `cloud.xyzc` (ASCII: x y z confidence).
+- The manifest records the device, timestamps, units, coordinate conventions, settings, depth support, frame and point counts, and the processing method.
+- Sessions are stored in the app's private cache. Only the 3 newest are kept.
+- None of this goes through the web bridge.
+
+**Accuracy:** phone AR depth is estimate-grade (centimetres, worse at range and on plain, dark or shiny surfaces). The S24 Ultra has no LiDAR, so depth comes from ARCore's motion stereo. Compare against laser readings before trusting any dimension.
+
 ## Universal Laser Connectivity Engine (ULCE)
 
 ```

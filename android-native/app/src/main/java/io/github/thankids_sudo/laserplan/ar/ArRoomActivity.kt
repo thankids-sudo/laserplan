@@ -8,7 +8,13 @@ import android.graphics.Color
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.media.Image
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -36,12 +42,27 @@ import com.google.ar.core.Session
 import com.google.ar.core.TrackingFailureReason
 import com.google.ar.core.TrackingState
 import com.google.ar.core.exceptions.CameraNotAvailableException
+import com.google.ar.core.exceptions.NotYetAvailableException
 import com.google.ar.core.exceptions.UnavailableApkTooOldException
 import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException
+import io.github.thankids_sudo.laserplan.BuildConfig
 import io.github.thankids_sudo.laserplan.geometry.ArRoomPayload
+import io.github.thankids_sudo.laserplan.survey.DepthMath
+import io.github.thankids_sudo.laserplan.survey.Intrinsics
+import io.github.thankids_sudo.laserplan.survey.KeyframePolicy
+import io.github.thankids_sudo.laserplan.survey.Keyframe
+import io.github.thankids_sudo.laserplan.survey.SurveyConfig
+import io.github.thankids_sudo.laserplan.survey.SurveyRecorder
+import io.github.thankids_sudo.laserplan.survey.SurveyViewerActivity
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.nio.ByteBuffer
+import java.text.SimpleDateFormat
+import java.util.Date
 import io.github.thankids_sudo.laserplan.geometry.Corner3
 import io.github.thankids_sudo.laserplan.geometry.P2
 import io.github.thankids_sudo.laserplan.geometry.RoomGeometry
@@ -66,6 +87,13 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     private lateinit var status: TextView
     private lateinit var floorBar: LinearLayout
     private lateinit var heightBar: LinearLayout
+    private lateinit var surveyBar: LinearLayout
+
+    // 3D survey (Record 3D / Stop 3D / View 3D / Export ZIP)
+    @Volatile private var recorder: SurveyRecorder? = null
+    @Volatile private var policy: KeyframePolicy? = null
+    private var lastSurveyDir: File? = null
+    @Volatile private var rawDepthSupported = false
 
     private var session: Session? = null
     private var installRequested = false
@@ -113,14 +141,16 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
             text = "Starting AR…"
         }
-        floorBar = bar(
-            "Add corner" to { addCorner() }, "Undo" to { undo() }, "Delete point" to { deleteNearCentre() },
-            "Height" to { setHeightMode(true) }, "Finish" to { finishRoom() }, "Cancel" to { cancel() },
-        )
+        floorBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(bar("Add corner" to { addCorner() }, "Undo" to { undo() }, "Delete point" to { deleteNearCentre() }))
+            addView(bar("Height" to { setHeightMode(true) }, "Finish" to { finishRoom() }, "Cancel" to { cancel() }))
+        }
+        surveyBar = bar("● Record 3D" to { startSurvey() }, "■ Stop 3D" to { stopSurvey(null) }, "View 3D" to { viewSurvey() }, "Export ZIP" to { exportSurvey() })
         heightBar = bar(
             "Set height" to { setHeightFromCeiling() }, "Type height" to { typeHeight() }, "Back" to { setHeightMode(false) },
         ).apply { visibility = View.GONE }
-        val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(floorBar); addView(heightBar) }
+        val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(surveyBar); addView(floorBar); addView(heightBar) }
         setContentView(FrameLayout(this).apply {
             addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(arOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -156,6 +186,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                     focusMode = Config.FocusMode.AUTO
                     updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                     if (s.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) { depthMode = Config.DepthMode.AUTOMATIC; depthUsed = true }
+                    rawDepthSupported = depthUsed && s.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY)
                 }
                 s.configure(cfg)
                 session = s
@@ -178,6 +209,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     override fun onDestroy() {
+        if (recorder != null) stopSurvey(null) // keep what was recorded
         session?.close()
         session = null
         super.onDestroy()
@@ -212,11 +244,14 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         if (cam.trackingState != TrackingState.TRACKING) {
             if (wasTracking) trackingLosses++
             wasTracking = false
+            if (recorder != null) { say("● REC 3D paused – tracking lost. No points are added until tracking returns."); arOverlay.state = OverlayState(heightMode = heightMode); return }
             say(trackingMessage(cam.trackingFailureReason))
             arOverlay.state = OverlayState(heightMode = heightMode)
             return
         }
+        if (!wasTracking) policy?.onTrackingRegained(SystemClock.elapsedRealtime())
         wasTracking = true
+        recordIfDue(frame)
         val hit = pickHit(frame)
         val floorSeen = s.getAllTrackables(Plane::class.java).any { it.trackingState == TrackingState.TRACKING && it.type == Plane.Type.HORIZONTAL_UPWARD_FACING }
         say(when {
@@ -282,7 +317,11 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         else -> "Tracking lost – hold steady and move slowly. Corners already placed are kept."
     }
 
-    private fun say(msg: String) {
+    private fun say(text: String) {
+        val r = recorder
+        val msg = if (r == null || text.startsWith("●")) text
+            else "● REC 3D  ${r.frames.get()}/${SurveyConfig.MAX_KEYFRAMES} keyframes · ${r.points} points" +
+                (if (policy?.full == true) " · limit reached – tap Stop 3D" else "") + "\n" + text
         if (msg == lastStatus) return
         lastStatus = msg
         runOnUiThread { status.text = msg }
@@ -366,6 +405,128 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     private fun fail(msg: String) {
         AlertDialog.Builder(this).setTitle("AR capture").setMessage(msg).setCancelable(false)
             .setPositiveButton("OK") { _, _ -> setResult(RESULT_CANCELED); finish() }.show()
+    }
+
+    // ---------------- 3D survey ----------------
+    private fun startSurvey() {
+        if (recorder != null) { toast("Already recording."); return }
+        if (session == null) { toast("AR is not running."); return }
+        if (!rawDepthSupported) {
+            AlertDialog.Builder(this).setTitle("3D survey not available")
+                .setMessage("This phone does not offer ARCore Raw Depth, so LaserPlan cannot record 3D points here. Corner capture, height and the laser still work.")
+                .setPositiveButton("OK", null).show()
+            return
+        }
+        val root = File(cacheDir, SurveyViewerActivity.ROOT).apply { mkdirs() }
+        SurveyRecorder.prune(root, keep = 2) // with the new one: at most 3 sessions on the phone
+        val dir = File(root, SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())).apply { mkdirs() }
+        val device = JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
+            .put("android", Build.VERSION.RELEASE).put("sdk", Build.VERSION.SDK_INT)
+            .put("arcoreApk", runCatching { packageManager.getPackageInfo("com.google.ar.core", 0).versionName }.getOrNull() ?: "unknown")
+        val depthInfo = JSONObject().put("rawDepthSupported", true).put("sessionDepthMode", "AUTOMATIC")
+            .put("api", "Frame.acquireRawDepthImage16Bits + Frame.acquireRawDepthConfidenceImage; intrinsics Camera.getTextureIntrinsics")
+        recorder = SurveyRecorder(dir, device, depthInfo, ::nv21ToJpeg)
+        policy = KeyframePolicy()
+        lastSurveyDir = dir
+        toast("Recording 3D. Walk slowly round the room, pointing at walls, floor and ceiling.")
+    }
+
+    /** Stops recording and finalises on a background thread; [then] runs on the UI thread afterwards. */
+    private fun stopSurvey(then: (() -> Unit)?) {
+        val r = recorder ?: run { then?.invoke() ?: toast("Not recording."); return }
+        recorder = null; policy = null
+        lastStatus = ""
+        Thread {
+            val res = runCatching { r.finish(BuildConfig.VERSION_NAME) }
+            runOnUiThread {
+                res.fold(
+                    { m -> toast("3D survey saved: ${m.optInt("frameCount")} keyframes, ${m.optInt("pointCount")} points.") },
+                    { e -> toast("Survey finalising failed: ${e.message}") },
+                )
+                then?.invoke()
+            }
+        }.start()
+    }
+
+    private fun viewSurvey() {
+        if (recorder != null) { stopSurvey { viewSurvey() }; return }
+        val dir = lastSurveyDir ?: latestSurvey() ?: run { toast("No 3D survey yet. Tap Record 3D first."); return }
+        startActivity(Intent(this, SurveyViewerActivity::class.java).putExtra(SurveyViewerActivity.EXTRA_DIR, dir.absolutePath))
+    }
+
+    private val saveZip = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val dir = lastSurveyDir ?: latestSurvey()
+        if (uri == null || dir == null) return@registerForActivityResult
+        Thread {
+            val err = runCatching { contentResolver.openOutputStream(uri)?.use { SurveyRecorder.zip(dir, it) } ?: error("Could not open the file") }.exceptionOrNull()
+            toast(err?.let { "Export failed: ${it.message}" } ?: "Survey ZIP saved.")
+        }.start()
+    }
+
+    private fun exportSurvey() {
+        if (recorder != null) { stopSurvey { exportSurvey() }; return }
+        val dir = lastSurveyDir ?: latestSurvey() ?: run { toast("No 3D survey to export yet."); return }
+        if (!File(dir, "manifest.json").isFile) { toast("This survey is still being saved – try again in a moment."); return }
+        saveZip.launch("LaserPlan-survey-${dir.name}.zip")
+    }
+
+    private fun latestSurvey(): File? = File(cacheDir, SurveyViewerActivity.ROOT).listFiles()
+        ?.filter { File(it, "manifest.json").isFile }?.maxByOrNull { it.name }
+
+    /** GL thread: takes a keyframe when due. Only copies buffers here; files, JPEG and points are done on the disk thread. */
+    private fun recordIfDue(frame: Frame) {
+        val r = recorder ?: return
+        val pol = policy ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (!pol.shouldCapture(now)) return
+        val depthImg = try { frame.acquireRawDepthImage16Bits() } catch (_: NotYetAvailableException) { return } catch (_: Exception) { return }
+        try {
+            val conf = try { frame.acquireRawDepthConfidenceImage() } catch (_: Exception) { null }
+            try {
+                val w = depthImg.width; val h = depthImg.height
+                val dp = depthImg.planes[0]
+                val depth = DepthMath.compact16(dp.buffer.bytes(), dp.rowStride, dp.pixelStride, w, h)
+                val confTight = conf?.takeIf { it.width == w && it.height == h }?.let { val cp = it.planes[0]; DepthMath.compact8(cp.buffer.bytes(), cp.rowStride, cp.pixelStride, w, h) }
+                val cam = frame.camera
+                val ti = cam.textureIntrinsics
+                val camK = Intrinsics(ti.focalLength[0].toDouble(), ti.focalLength[1].toDouble(), ti.principalPoint[0].toDouble(), ti.principalPoint[1].toDouble(), ti.imageDimensions[0], ti.imageDimensions[1])
+                val pose = cam.pose
+                val m = FloatArray(16).also { pose.toMatrix(it, 0) }
+                var nv21: ByteArray? = null; var rgbW = 0; var rgbH = 0
+                var rgbStatus = "not-requested"
+                if (pol.taken % SurveyConfig.RGB_EVERY_N_KEYFRAMES == 0) {
+                    rgbStatus = try {
+                        frame.acquireCameraImage().use { img -> nv21 = yuvToNv21(img); rgbW = img.width; rgbH = img.height }
+                        "captured"
+                    } catch (_: NotYetAvailableException) { "unavailable: camera image not ready" } catch (e: Exception) { "unavailable: ${e.javaClass.simpleName}" }
+                }
+                val ok = r.submit(Keyframe(depth, confTight, w, h, camK.scaledTo(w, h), camK, m, pose.translation, pose.rotationQuaternion,
+                    depthImg.timestamp, frame.timestamp, nv21, rgbStatus, rgbW, rgbH))
+                if (ok) pol.captured(now)
+            } finally { conf?.close() }
+        } finally { depthImg.close() }
+    }
+
+    private fun ByteBuffer.bytes(): ByteArray { val b = duplicate(); b.rewind(); return ByteArray(b.remaining()).also { b.get(it) } }
+
+    /** YUV_420_888 (any strides) → NV21. */
+    private fun yuvToNv21(img: Image): ByteArray {
+        val w = img.width; val h = img.height
+        val out = ByteArray(w * h * 3 / 2)
+        val y = img.planes[0]; val u = img.planes[1]; val v = img.planes[2]
+        val yb = y.buffer.bytes(); val ub = u.buffer.bytes(); val vb = v.buffer.bytes()
+        for (r in 0 until h) for (c in 0 until w) out[r * w + c] = yb[r * y.rowStride + c * y.pixelStride]
+        var o = w * h
+        for (r in 0 until h / 2) for (c in 0 until w / 2) {
+            out[o++] = vb[r * v.rowStride + c * v.pixelStride]
+            out[o++] = ub[r * u.rowStride + c * u.pixelStride]
+        }
+        return out
+    }
+
+    private fun nv21ToJpeg(nv21: ByteArray, w: Int, h: Int): ByteArray? {
+        val bos = ByteArrayOutputStream()
+        return if (YuvImage(nv21, ImageFormat.NV21, w, h, null).compressToJpeg(Rect(0, 0, w, h), SurveyConfig.JPEG_QUALITY, bos)) bos.toByteArray() else null
     }
 
     companion object {

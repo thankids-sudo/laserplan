@@ -58,6 +58,11 @@
             android:theme="@style/Theme.LaserPlan" />
 
         <activity
+            android:name=".survey.SurveyViewerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LaserPlan" />
+
+        <activity
             android:name=".ui.LaserActivity"
             android:exported="false"
             android:label="@string/laser_title"
