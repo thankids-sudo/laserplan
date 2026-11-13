@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "updated": "2026-11-13",
+  "legend": {
+    "VERIFIED": "Tested with the physical meter in this app",
+    "PROTOCOL_SUPPORTED": "Adapter implemented from a documented or published protocol; not yet tested with the physical meter",
+    "EXPERIMENTAL": "May work; needs a test report",
+    "UNSUPPORTED": "Known not to work",
+    "NOT_EVALUATED": "No adapter yet; keyboard mode may work if the meter offers it"
+  },
+  "devices": [
+    {"brand": "Bosch", "models": "GLM 50-27 CG (reference meter)", "transport": "BLE", "adapter": "bosch-mt", "status": "PROTOCOL_SUPPORTED",
+     "evidence": "Same MT protocol used by the LaserPlan web app since v8 with this meter; native app awaiting field test",
+     "notes": "Becomes VERIFIED after a field test in the native app with screen readings compared"},
+    {"brand": "Bosch", "models": "GLM 50 C, GLM 50-27 C, GLM 100-25 C, GLM 150-27 C, PLR 30 C, PLR 40 C, PLR 50 C", "transport": "BLE", "adapter": "bosch-mt", "status": "EXPERIMENTAL",
+     "evidence": "Same Bosch MT service family per public integrations; not tested here", "notes": "Some older units may use Bluetooth Classic"},
+    {"brand": "Leica", "models": "DISTO D1, D2, D110, D510, D810 touch, X3, X4, X6, S910", "transport": "BLE", "adapter": "leica-disto", "status": "PROTOCOL_SUPPORTED",
+     "evidence": "DISTO BLE distance service (float32 metres) per public integrations", "notes": "Press measure on the DISTO; untested with hardware"},
+    {"brand": "Stabila", "models": "LD 250 BT, LD 520, LD 530 BT", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED",
+     "evidence": "", "notes": "Built with Leica; may expose the DISTO service – send a diagnostics report"},
+    {"brand": "Hilti", "models": "PD-I, PD-CS", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": "Protocol not documented publicly"},
+    {"brand": "DeWalt", "models": "DW03201, DWHT78200", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": ""},
+    {"brand": "Stanley", "models": "TLM 99s, Fatmax TLM 165s", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": ""},
+    {"brand": "Mileseey", "models": "S50C, P7, T7, M120, dTAPE", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": "Several models offer keyboard mode"},
+    {"brand": "Laserliner", "models": "LaserRange-Master Gi, DistanceMaster (Bluetooth models)", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": ""},
+    {"brand": "Würth", "models": "WDM (Bluetooth models)", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": ""},
+    {"brand": "SOLA", "models": "METRON 60 BT", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": ""},
+    {"brand": "Johnson Level", "models": "LDM330", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": ""},
+    {"brand": "CEM / ADA / Precaster / Suaoki / Nivel System", "models": "Bluetooth models", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": ""},
+    {"brand": "REEKON", "models": "T1, T1M, T1R digital tapes", "transport": "BLE", "adapter": "", "status": "NOT_EVALUATED", "evidence": "", "notes": "Offers keyboard mode"},
+    {"brand": "Any meter with keyboard (HID) mode", "models": "—", "transport": "HID_KEYBOARD", "adapter": "hid-keyboard", "status": "EXPERIMENTAL",
+     "evidence": "Generic: the meter types readings like a keyboard", "notes": "Pick the meter under Keyboard mode; bare numbers use the unit you choose"},
+    {"brand": "Any meter streaming text over Bluetooth Classic", "models": "—", "transport": "CLASSIC_SPP", "adapter": "spp-text", "status": "EXPERIMENTAL",
+     "evidence": "Generic RFCOMM/SPP text lines", "notes": "Pair in Android settings first"}
+  ]
+}

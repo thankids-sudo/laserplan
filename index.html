@@ -3932,6 +3932,43 @@ function v12Extra3D(T,grp,Z,onlyFloor){ if(!P) return; v12Init(P); const M=c=>ne
   for(const e of P.fur){ if(onlyFloor&&e.floor!==R().floor) continue; const g=fuGeo(e), w2=e.w/2, d2=Math.max(e.d,0.02)/2; ext([g.P(-w2,-d2),g.P(w2,-d2),g.P(w2,d2),g.P(-w2,d2)],(Z[e.floor]||0)+(e.z||0),e.h,wood); }
   for(const r of P.rooms){ if(onlyFloor&&r.floor!==R().floor) continue; const k=r.kp; if(!k) continue; const z0=Z[r.floor]||0, t=k.thk/1000; for(const s of kpStrips(r)){ ext(s.poly,z0,k.H-t,body); ext(s.poly,z0+k.H-t,t,k.top==='marble'||k.top==='quartz'?light:dark); } } }
 
+/* ===================== v13: native Android bridge =====================
+   Inert in a browser. Inside the native LaserPlan app (android-native/), the app injects window.LPNative
+   (androidx.webkit WebMessageListener, allowed origin https://appassets.androidplatform.net only).
+   Messages are JSON strings. Web → native: {cmd:'hello'|'laser.open'|'laser.reconnect'|'laser.disconnect'|'save'|'ar.open'}.
+   Native → web: {type:'state'|'reading'|'toast'|'saved'|'ar.room'}. Readings go through lzReading(), so the arming,
+   stale-reading, duplicate and lock rules of the laser session apply unchanged. */
+const NAT={on:!!(window.LPNative&&typeof window.LPNative.postMessage==='function'),st:null,hello:false};
+function natSend(o){ if(!NAT.on) return false; try{ window.LPNative.postMessage(JSON.stringify(o)); return true; }catch(e){ console.warn('LPNative',e); return false; } }
+function natState(m){ NAT.st=m; const s=m.state==='on'?'on':m.state==='busy'?'busy':'off';
+  if(!LZ.meter||LZ.meter.kind!=='native') LZ.meter={id:'native',kind:'native',name:'Laser'}; LZ.meter.name=m.device||LZ.meter.name;
+  if(s!=='off') LZ.session=true; setBt(s); lzSetState(s); if(m.error) LZ.lastErr=String(m.error).slice(0,300); }
+function natOn(m){ if(!m||typeof m!=='object') return;
+  if(m.type==='state') natState(m);
+  else if(m.type==='reading'){ const v=+m.v; if(!(v>0)||!isFinite(v)) return; const u=typeof m.u==='string'&&m.u.length<6?m.u:'m';
+    if(!LZ.meter||LZ.meter.kind!=='native') natState({state:'on',device:m.device||'Laser'});
+    const src='laser:'+String(m.adapter||'native').slice(0,40), mm=+m.m;
+    if(lzWants(src)) lzReading({v,u,src}); else if(mm>0&&isFinite(mm)) onDistanceLegacy(mm,src); }
+  else if(m.type==='toast'&&m.text) toast(String(m.text).slice(0,300));
+  else if(m.type==='saved') toast(m.ok?`Saved ${m.name||'file'}.`:`Not saved${m.error?': '+m.error:''}.`); }
+function natInit(){ const L=window.LPNative; NAT.on=!!(L&&typeof L.postMessage==='function'); if(!NAT.on) return;
+  L.onmessage=ev=>{ let m=null; try{ m=JSON.parse(ev.data); }catch(_){ return; } natOn(m); };
+  document.documentElement.classList.add('native');
+  const _lzConnect=lzConnect, _lzReconnect=lzReconnect, _lzEnd=lzEnd, _btDisconnect=btDisconnect;
+  lzConnect=async function(id){ const m=lzMeterById(id); if(m&&m.kind==='sim') return _lzConnect(id); if(BT.state==='on') _btDisconnect();
+    LZ.session=true; P.settings.lzMeter=id; LZ.meter={id:'native',kind:'native',name:'Laser'}; lzSetState('busy'); natSend({cmd:'laser.open',meter:String(id||'')}); };
+  lzReconnect=async function(){ if(LZ.meter&&LZ.meter.kind==='sim') return _lzReconnect(); LZ.session=true; lzSetState('busy'); natSend({cmd:'laser.reconnect'}); };
+  lzEnd=function(){ if(LZ.meter&&LZ.meter.kind==='native') natSend({cmd:'laser.disconnect'}); return _lzEnd(); };
+  btDisconnect=function(){ if(LZ.meter&&LZ.meter.kind==='native'){ natSend({cmd:'laser.disconnect'}); setBt('off'); return; } return _btDisconnect(); };
+  btConnect=function(){ return lzConnect(P.settings.lzMeter&&P.settings.lzMeter!=='sim'?P.settings.lzMeter:'native'); };
+  download=function(name,blob){ const fr=new FileReader(); fr.onload=()=>{ const s=String(fr.result), b64=s.slice(s.indexOf(',')+1);
+      if(!natSend({cmd:'save',name:String(name).replace(/[\\/:*?"<>|]+/g,'_').slice(0,120),mime:blob.type||'application/octet-stream',b64})) toast('Could not hand the file to Android.'); };
+    fr.onerror=()=>toast('Could not read the file to save.'); fr.readAsDataURL(blob); };
+  const arMsg=()=>toast('Native AR room capture arrives in the next update. Meanwhile use AR simulation, OBJ scan import or the laser.');
+  arStart=async function(force){ if(force==='sim') return; arMsg(); }; arHandoff=function(){ arMsg(); };
+  window.lpNativeBack=()=>{ if($('dlgRoot').innerHTML){ closeDialog(); return 'handled'; } if(document.querySelector('.ov.show,#arOv.show')){ try{ arClose&&arClose(); }catch(_){} return 'handled'; } return 'exit'; };
+  natSend({cmd:'hello',v:13}); NAT.hello=true; }
+
 /* ===================== Wiring ===================== */
 for(const b of document.querySelectorAll('.tool[data-mode]')) b.onclick=()=>setMode(b.dataset.mode);
 for(const b of document.querySelectorAll('#tabs button')) b.onclick=()=>{ S.tab=b.dataset.tab; syncUi(); };
@@ -3971,9 +4008,10 @@ new ResizeObserver(resize).observe(cv);
   S.sel=R().walls.findIndex(w=>!w.m); syncSnaps(); setMode(R().walls.length?'edit':'draw'); resize(); fit();
   if(document.fonts) document.fonts.ready.then(()=>{ for(const k in cssCache) delete cssCache[k]; draw(); });
   document.addEventListener('visibilitychange',syncFromStorage); arBootFromLink();
-  if('serviceWorker' in navigator&&location.protocol==='https:'&&!/claude\.ai|claudeusercontent/.test(location.host)) navigator.serviceWorker.register('sw.js').catch(()=>{});
+  if(!NAT.on&&'serviceWorker' in navigator&&location.protocol==='https:'&&!/claude\.ai|claudeusercontent|appassets\.androidplatform/.test(location.host)) navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
-window.LaserPlan={V12,FU_X,v12NewFu,v12Init,kpCalc,kpSuggest,openFuDialog,openKpDialog,openFuSettings,V11,PL_X,GEN,v11NewPl,v11Nets,v11AutoLayout,openPlDialog,openPlumbingDialog,genBasis,v11Init,openSpecDialog,open3D,V10,v10Elev,v10Map,v10AddItem,v10Apply,V9,v9StartPlace,v9PlaceAt,v9EndPlace,v9NewStair,v9NewSlab,v9NewEl,v9Route,stairGeom,stairCalc,attachRoom,openAttachDialog,openOpDialog,openElDialog,openStairDialog,openSlabDialog,openWiringDialog,openAddMenu,offsetRoomOut,v9SwitchAt,v9FindOp,v9DelOp,v9Hit,openStairRoomDialog,switchRoom,arHandoff,syncFromStorage,arFail,AR,arSimulate,arAdd,arFinish,arEnv,scanOutline,capToRoom,openCapture,objImportFile,lzGuideNext,lzFill,lzUseQueued,lzNeedDiags,lzSkip,cornerAngles,LZ,lzReading,lzSimPress,lzConnect,lzLaser,lzUnlock,lzLock,lzToMetres,lockMap,lockCheck,ensureIds,lzResolve,saveProject,openWallDialog,openLaserPicker,lzEnv,insertCorner,openCtx,hoverAt,clipCopy,clipPaste,nudge,orthoOn,updStatus,CAD,TOOLS,cadStart,cadSubmit,cadNumber,cadPoint,cadEnd,cadSnap,w2u,u2w,UCS,entLen,entArea,shapeToRoom,freshRoomIfNeeded,zoomExtents,cadPrompt,splitRoom,projOnWall,squareUp,colArea,colPerim,polyAreaPts,customRow,addonTotals,open3D,openColumnDialog,openAreaDialog,areaCommit,duplicateFloor,syncStack,floorLevels,areaStatement,qaChecks,solveDiagonals,cornerAngles,cornerK,siteReportHTML,ringArea,openDefectDialog,S,verts,setVerts,insertCorner,deleteCorner,transformRoom,rotF,mirHF,duplicateRoom,rectRoom,lineCommit,lineByLength,addDim,snapPt,setTool,setMode,W2S,parseGlmPacket,sketchToWalls,solveClosure,parseLen,ftin,estimate,toDXF,toXLSX,toSVG,onDistance,migrate,get P(){return P},set P(v){P=v}};
+natInit();
+window.LaserPlan={NAT,natOn,V12,FU_X,v12NewFu,v12Init,kpCalc,kpSuggest,openFuDialog,openKpDialog,openFuSettings,V11,PL_X,GEN,v11NewPl,v11Nets,v11AutoLayout,openPlDialog,openPlumbingDialog,genBasis,v11Init,openSpecDialog,open3D,V10,v10Elev,v10Map,v10AddItem,v10Apply,V9,v9StartPlace,v9PlaceAt,v9EndPlace,v9NewStair,v9NewSlab,v9NewEl,v9Route,stairGeom,stairCalc,attachRoom,openAttachDialog,openOpDialog,openElDialog,openStairDialog,openSlabDialog,openWiringDialog,openAddMenu,offsetRoomOut,v9SwitchAt,v9FindOp,v9DelOp,v9Hit,openStairRoomDialog,switchRoom,arHandoff,syncFromStorage,arFail,AR,arSimulate,arAdd,arFinish,arEnv,scanOutline,capToRoom,openCapture,objImportFile,lzGuideNext,lzFill,lzUseQueued,lzNeedDiags,lzSkip,cornerAngles,LZ,lzReading,lzSimPress,lzConnect,lzLaser,lzUnlock,lzLock,lzToMetres,lockMap,lockCheck,ensureIds,lzResolve,saveProject,openWallDialog,openLaserPicker,lzEnv,insertCorner,openCtx,hoverAt,clipCopy,clipPaste,nudge,orthoOn,updStatus,CAD,TOOLS,cadStart,cadSubmit,cadNumber,cadPoint,cadEnd,cadSnap,w2u,u2w,UCS,entLen,entArea,shapeToRoom,freshRoomIfNeeded,zoomExtents,cadPrompt,splitRoom,projOnWall,squareUp,colArea,colPerim,polyAreaPts,customRow,addonTotals,open3D,openColumnDialog,openAreaDialog,areaCommit,duplicateFloor,syncStack,floorLevels,areaStatement,qaChecks,solveDiagonals,cornerAngles,cornerK,siteReportHTML,ringArea,openDefectDialog,S,verts,setVerts,insertCorner,deleteCorner,transformRoom,rotF,mirHF,duplicateRoom,rectRoom,lineCommit,lineByLength,addDim,snapPt,setTool,setMode,W2S,parseGlmPacket,sketchToWalls,solveClosure,parseLen,ftin,estimate,toDXF,toXLSX,toSVG,onDistance,migrate,get P(){return P},set P(v){P=v}};
 </script>
 
 </body>
