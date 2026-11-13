@@ -216,7 +216,7 @@ class LaserActivity : AppCompatActivity() {
     private fun renderKeyboards() {
         keyboardList.removeAllViews()
         val im = getSystemService(InputManager::class.java)
-        val devices = im.inputDeviceIds.mapNotNull { im.getInputDevice(it) }.filter { dev ->
+        val devices = im.inputDeviceIds.toList().mapNotNull { id -> im.getInputDevice(id) }.filter { dev: InputDevice ->
             !dev.isVirtual && dev.sources and InputDevice.SOURCE_KEYBOARD == InputDevice.SOURCE_KEYBOARD &&
                 (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || dev.isExternal)
         }
