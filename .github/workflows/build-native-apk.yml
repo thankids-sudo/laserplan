@@ -1,0 +1,103 @@
+# Builds the native Android app in android-native/ (Kotlin, WebView-hosted drawing engine, native Bluetooth).
+# Runs on every push to the native feature branch and on demand. The old TWA workflow (build-apk.yml) is untouched.
+# Artifacts: a DEBUG APK (installs beside the store app as "io.github.thankids_sudo.laserplan.debug") and, when the
+# KEYSTORE_BASE64 / KEYSTORE_PASSWORD secrets exist, a RELEASE APK signed with the same key as the installed app.
+name: Build native Android APK
+
+on:
+  push:
+    branches: [feature/native-arcore-universal-laser]
+    paths:
+      - "android-native/**"
+      - "index.html"
+      - "three.min.js"
+      - "xlsx.full.min.js"
+      - ".github/workflows/build-native-apk.yml"
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Version name (e.g. 13.0)"
+        default: "13.0"
+      version_code:
+        description: "Version code (must be higher than the installed app's; 12.0 was 1200)"
+        default: "1300"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      VERSION_NAME: ${{ github.event.inputs.version_name || '13.0' }}
+      VERSION_CODE: ${{ github.event.inputs.version_code || '1300' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Android SDK packages
+        run: |
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SM" --licenses > /dev/null || true
+          "$SM" --install "platforms;android-36" "build-tools;36.0.0" > /dev/null || echo "::warning::sdkmanager install failed; Gradle will try."
+
+      - name: Unit tests (protocol decoders, units, reading gate, bridge, compatibility list)
+        working-directory: android-native
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Debug APK
+        working-directory: android-native
+        run: gradle --no-daemon assembleDebug lintDebug
+
+      - name: Release APK (signed with the saved key, if present)
+        working-directory: android-native
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PW" ]; then
+            echo "::warning::No signing secrets – release APK skipped. Only the debug APK is produced."
+            exit 0
+          fi
+          echo "::add-mask::$KS_PW"
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          export LP_KEYSTORE="$RUNNER_TEMP/release.keystore" LP_KEYSTORE_PW="$KS_PW" LP_KEY_ALIAS=laserplan
+          gradle --no-daemon assembleRelease
+          APK=app/build/outputs/apk/release/app-release.apk
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/apksigner" verify --print-certs "$APK" | grep -E "SHA-256|Signer" | tee ../release-cert.txt
+          rm -f "$RUNNER_TEMP/release.keystore"
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          cp android-native/app/build/outputs/apk/debug/app-debug.apk "out/LaserPlan-${VERSION_NAME}-DEBUG.apk"
+          if [ -f android-native/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android-native/app/build/outputs/apk/release/app-release.apk "out/LaserPlan-${VERSION_NAME}-release.apk"
+            cp release-cert.txt out/
+          fi
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LaserPlan-native-${{ env.VERSION_NAME }}
+          path: out/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-and-lint-reports
+          path: |
+            android-native/app/build/reports/
+            android-native/app/build/test-results/
+          if-no-files-found: ignore
