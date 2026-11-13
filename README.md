@@ -480,6 +480,14 @@ Open a wall (tap it twice). The wall window now shows the wall as an elevation y
 
 Sizes were checked against: HouseYog – kitchen platform height, depth and walkway (https://www.houseyog.com/blog/kitchen-platform-height-depth-walkway/); Studio Matrx furniture size chart (https://www.studiomatrx.org/utilities/furniture-size-chart); Stone Galleria granite thickness guide (https://www.stonegalleria.in/granite-thickness-guide/); Comaron kitchen platform stone comparison (https://www.comaron.com/blog/kitchen-platform-stone-comparison-2026). The construction of a "sandwich" platform varies between contractors. The definition above is the common local meaning; edit the item description in the Excel file if your schedule words it differently.
 
+## 3M. Version 13: native Android app (in development)
+
+The native Kotlin app is in `android-native/`; see `android-native/README.md` for details. It is built by the **Build native Android APK** workflow on the `feature/native-arcore-universal-laser` branch.
+* It runs this same web engine offline inside the app.
+* Laser meters connect through native Bluetooth: Bosch MT protocol, Leica DISTO, keyboard mode, and an experimental Classic SPP mode.
+* The web app gained a small bridge (`window.LPNative`) that does nothing in a normal browser.
+* Native ARCore room capture is the next phase.
+
 ## 4. Excel workbook
 
 | Sheet | Contents |

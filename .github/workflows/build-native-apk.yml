@@ -54,6 +54,18 @@ jobs:
         working-directory: android-native
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
+      - name: Unit test summary
+        if: always()
+        run: |
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          t=f=e=s=0
+          for x in glob.glob('android-native/app/build/test-results/testDebugUnitTest/*.xml'):
+              r=ET.parse(x).getroot(); t+=int(r.get('tests')); f+=int(r.get('failures')); e+=int(r.get('errors')); s+=int(r.get('skipped'))
+              print(f"{r.get('name')}: {r.get('tests')} tests, {r.get('failures')} failures, {r.get('errors')} errors")
+          print(f"TOTAL: {t} tests, {f} failures, {e} errors, {s} skipped")
+          PY
+
       - name: Debug APK
         working-directory: android-native
         run: gradle --no-daemon assembleDebug lintDebug
