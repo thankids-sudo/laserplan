@@ -117,6 +117,7 @@ class PoseHistoryTest {
         val depthTs = 1_000_000_000L + 56 * 33_333_333L
         assertEquals(56f, h.find(depthTs)!!.matrix[12])
         assertNull(h.find(depthTs + 10_000_000L))            // 10 ms off any frame → no guess
+        assertEquals(56f, h.find(depthTs + 2_000_000L)!!.matrix[12])   // field data: depth stamps sit ~2.0 ms from their frame
     }
 
     @Test fun dropsOldAndOutOfOrderPoses() {

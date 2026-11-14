@@ -10,6 +10,7 @@ import io.github.thankids_sudo.laserplan.laser.protocol.BoschMtProtocol
 import io.github.thankids_sudo.laserplan.laser.protocol.LeicaDistoProtocol
 import io.github.thankids_sudo.laserplan.laser.registry.CompatibilityRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -31,10 +32,29 @@ class BoschMtProtocolTest {
         assertNull(BoschMtProtocol.decode(hex("C0 55 10 06 00 00 00 00 00 C0 7F 00")))      // NaN
         assertNull(BoschMtProtocol.decode(ByteArray(0)))
     }
-    @Test fun legacyFrame() {
-        // 0x00 header, uint32 LE at offset 2 in 0.05 mm steps: 60000 → 3.0 m
-        val r = BoschMtProtocol.decode(hex("00 00 60 EA 00 00"))
-        assertEquals(3.0, r!!.value, 1e-9)
+    @Test fun remoteMeasureReply() {
+        // Published example: 00 04 4A 86 00 00 16 → 34378 × 0.05 mm = 1.7189 m
+        val r = BoschMtProtocol.decode(hex("00 04 4A 86 00 00 16"))
+        assertEquals(1.7189, r!!.value, 1e-9)
+        // The GLM 50-27 CG's 18-byte status reply to auto-sync (field log) must never be read as a distance
+        assertNull(BoschMtProtocol.decode(hex("00 10 02 00 96 0A 00 00 00 00 00 00 00 00 00 00 00 00 84")))
+    }
+
+    @Test fun checksumMatchesAllCapturedFrames() {
+        assertEquals(0x3A, BoschMtProtocol.crc8(hex("C0 11 00")))
+        assertEquals(0x1A, BoschMtProtocol.crc8(hex("C0 55 02 01 00")))
+        assertEquals(0xEE, BoschMtProtocol.crc8(hex("C0 40 00")))
+        assertEquals(0x16, BoschMtProtocol.crc8(hex("00 04 4A 86 00 00")))
+        assertEquals(0x84, BoschMtProtocol.crc8(hex("00 10 02 00 96 0A 00 00 00 00 00 00 00 00 00 00 00 00")))
+        assertEquals(0x82, BoschMtProtocol.crc8(hex("00 00")))
+        assertEquals("00 00 82", BoschMtProtocol.ACK.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) })
+    }
+
+    @Test fun meterRequestsAreAcknowledgedOnlyWhenValid() {
+        assertTrue(BoschMtProtocol.needsAck(hex("C0 11 00 3A")))          // field log: repeated every 1.6 s
+        assertFalse(BoschMtProtocol.needsAck(hex("C0 11 00 3B")))         // bad checksum
+        assertFalse(BoschMtProtocol.needsAck(hex("00 10 02 00 96 0A 00 00 00 00 00 00 00 00 00 00 00 00 84"))) // a reply, not a request
+        assertFalse(BoschMtProtocol.needsAck(hex("C0 11 00")))            // truncated
     }
     @Test fun autoSyncCommandUnchanged() =
         assertEquals("C0 55 02 01 00 1A", BoschMtProtocol.CMD_AUTO_SYNC.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) })
