@@ -53,6 +53,9 @@ import io.github.thankids_sudo.laserplan.geometry.ArRoomPayload
 import io.github.thankids_sudo.laserplan.survey.DepthMath
 import io.github.thankids_sudo.laserplan.survey.Intrinsics
 import io.github.thankids_sudo.laserplan.survey.KeyframePolicy
+import io.github.thankids_sudo.laserplan.survey.PoseHistory
+import io.github.thankids_sudo.laserplan.survey.ScanEvents
+import io.github.thankids_sudo.laserplan.survey.ScanStore
 import io.github.thankids_sudo.laserplan.survey.Keyframe
 import io.github.thankids_sudo.laserplan.survey.SurveyConfig
 import io.github.thankids_sudo.laserplan.survey.SurveyRecorder
@@ -93,6 +96,13 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     @Volatile private var recorder: SurveyRecorder? = null
     @Volatile private var policy: KeyframePolicy? = null
     private var lastSurveyDir: File? = null
+    private var lastScanId: String? = null
+    private val sessionScans = mutableListOf<String>()
+    private val poseHistory = PoseHistory()
+    private var lastDepthTs = 0L
+    private val projectId by lazy { intent.getStringExtra(EXTRA_PROJECT)?.takeIf { ScanStore.isSafeId(it) } }
+    private val roomId by lazy { intent.getStringExtra(EXTRA_ROOM_ID)?.takeIf { ScanStore.isSafeId(it) } ?: "none" }
+    private val roomName by lazy { intent.getStringExtra(EXTRA_ROOM_NAME)?.take(60) ?: "" }
     @Volatile private var rawDepthSupported = false
 
     private var session: Session? = null
@@ -244,6 +254,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         if (cam.trackingState != TrackingState.TRACKING) {
             if (wasTracking) trackingLosses++
             wasTracking = false
+            poseHistory.clear()
             if (recorder != null) { say("● REC 3D paused – tracking lost. No points are added until tracking returns."); arOverlay.state = OverlayState(heightMode = heightMode); return }
             say(trackingMessage(cam.trackingFailureReason))
             arOverlay.state = OverlayState(heightMode = heightMode)
@@ -251,6 +262,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         }
         if (!wasTracking) policy?.onTrackingRegained(SystemClock.elapsedRealtime())
         wasTracking = true
+        if (recorder != null) poseHistory.add(PoseHistory.Rec(frame.timestamp, FloatArray(16).also { cam.pose.toMatrix(it, 0) }, cam.pose.translation, cam.pose.rotationQuaternion))
         recordIfDue(frame)
         val hit = pickHit(frame)
         val floorSeen = s.getAllTrackables(Plane::class.java).any { it.trackingState == TrackingState.TRACKING && it.type == Plane.Type.HORIZONTAL_UPWARD_FACING }
@@ -380,13 +392,19 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             }.setNegativeButton("Cancel", null).show()
     }
 
-    private fun finishRoom() = actions.add { _ ->
+    private fun finishRoom() {
+        if (recorder != null) { toast("Saving the 3D scan first…"); stopSurvey { finishRoom() }; return }
+        finishRoomNow()
+    }
+
+    private fun finishRoomNow() = actions.add { _ ->
         val fy = floorY ?: run { toast("Add the floor corners first."); return@add }
         val c3 = corners.map { val p = it.anchor.pose; Corner3(p.tx().toDouble(), p.ty().toDouble(), p.tz().toDouble(), it.source, it.timeMs) }
         val problems = RoomGeometry.problems(RoomGeometry.toPlan(c3))
         if (problems.isNotEmpty()) { toast(problems.first()); return@add }
         val height = manualHeight ?: ceilingY?.let { (it - fy).toDouble() }
-        val json = ArRoomPayload.build(c3, fy.toDouble(), height, heightSource, depthUsed, trackingLosses, startedAt).toString()
+        val json = ArRoomPayload.build(c3, fy.toDouble(), height, heightSource, depthUsed, trackingLosses, startedAt)
+            .put("scans", org.json.JSONArray(sessionScans)).toString()
         runOnUiThread {
             setResult(RESULT_OK, Intent().putExtra(EXTRA_ROOM, json))
             finish()
@@ -417,18 +435,27 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                 .setPositiveButton("OK", null).show()
             return
         }
-        val root = File(cacheDir, SurveyViewerActivity.ROOT).apply { mkdirs() }
-        SurveyRecorder.prune(root, keep = 2) // with the new one: at most 3 sessions on the phone
-        val dir = File(root, SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())).apply { mkdirs() }
+        val pid = projectId ?: run { toast("Open AR from a project (Capture room shape → Start AR) to record a 3D scan."); return }
+        if (ScanStore.freeBytes(this) < ScanStore.MIN_FREE_BYTES) {
+            AlertDialog.Builder(this).setTitle("Phone storage almost full")
+                .setMessage("Less than 500 MB is free. Free some space or delete old scans from a room's 3D scans list, then try again.")
+                .setPositiveButton("OK", null).show(); return
+        }
+        val (scanId, dir) = ScanStore.newScan(this, pid) ?: run { toast("Could not create the scan folder."); return }
+        ScanStore.writeOwner(dir, pid, roomId, roomName)
+        lastScanId = scanId; sessionScans += scanId
+        poseHistory.clear(); lastDepthTs = 0L
         val device = JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
             .put("android", Build.VERSION.RELEASE).put("sdk", Build.VERSION.SDK_INT)
             .put("arcoreApk", runCatching { packageManager.getPackageInfo("com.google.ar.core", 0).versionName }.getOrNull() ?: "unknown")
         val depthInfo = JSONObject().put("rawDepthSupported", true).put("sessionDepthMode", "AUTOMATIC")
             .put("api", "Frame.acquireRawDepthImage16Bits + Frame.acquireRawDepthConfidenceImage; intrinsics Camera.getTextureIntrinsics")
+            .put("project", JSONObject().put("projectId", pid).put("roomId", roomId).put("roomName", roomName).put("scanId", scanId))
         recorder = SurveyRecorder(dir, device, depthInfo, ::nv21ToJpeg)
         policy = KeyframePolicy()
         lastSurveyDir = dir
-        toast("Recording 3D. Walk slowly round the room, pointing at walls, floor and ceiling.")
+        val used = ScanStore.sizeBytes(ScanStore.projectDir(this, pid)) / 1_048_576
+        toast("Recording 3D for ${roomName.ifEmpty { "this room" }} (project scans so far: $used MB). Walk slowly round the room.")
     }
 
     /** Stops recording and finalises on a background thread; [then] runs on the UI thread afterwards. */
@@ -440,7 +467,14 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             val res = runCatching { r.finish(BuildConfig.VERSION_NAME) }
             runOnUiThread {
                 res.fold(
-                    { m -> toast("3D survey saved: ${m.optInt("frameCount")} keyframes, ${m.optInt("pointCount")} points.") },
+                    { m ->
+                        toast("3D scan saved to ${roomName.ifEmpty { "the room" }}: ${m.optInt("validFrameCount")}/${m.optInt("frameCount")} keyframes used, ${m.optInt("pointCount")} points.")
+                        val pid = projectId; val sid = r.dir.name
+                        if (pid != null) ScanEvents.post(JSONObject().put("type", "scan.saved").put("projectId", pid).put("roomId", roomId)
+                            .put("scanId", sid).put("date", System.currentTimeMillis()).put("frames", m.optInt("frameCount"))
+                            .put("validFrames", m.optInt("validFrameCount")).put("points", m.optInt("pointCount"))
+                            .put("bytes", ScanStore.sizeBytes(r.dir)).toString())
+                    },
                     { e -> toast("Survey finalising failed: ${e.message}") },
                 )
                 then?.invoke()
@@ -470,7 +504,8 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         saveZip.launch("LaserPlan-survey-${dir.name}.zip")
     }
 
-    private fun latestSurvey(): File? = File(cacheDir, SurveyViewerActivity.ROOT).listFiles()
+    /** Latest finished scan of THIS project (never another project's). */
+    private fun latestSurvey(): File? = projectId?.let { ScanStore.projectDir(this, it) }?.listFiles()
         ?.filter { File(it, "manifest.json").isFile }?.maxByOrNull { it.name }
 
     /** GL thread: takes a keyframe when due. Only copies buffers here; files, JPEG and points are done on the disk thread. */
@@ -480,6 +515,10 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         val now = SystemClock.elapsedRealtime()
         if (!pol.shouldCapture(now)) return
         val depthImg = try { frame.acquireRawDepthImage16Bits() } catch (_: NotYetAvailableException) { return } catch (_: Exception) { return }
+        // Depth usually belongs to an earlier camera frame: use that frame's pose; skip if it is a repeat or too old.
+        val rec = if (depthImg.timestamp == lastDepthTs) null else poseHistory.find(depthImg.timestamp)
+        if (rec == null) { depthImg.close(); return }
+        lastDepthTs = depthImg.timestamp
         try {
             val conf = try { frame.acquireRawDepthConfidenceImage() } catch (_: Exception) { null }
             try {
@@ -490,8 +529,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                 val cam = frame.camera
                 val ti = cam.textureIntrinsics
                 val camK = Intrinsics(ti.focalLength[0].toDouble(), ti.focalLength[1].toDouble(), ti.principalPoint[0].toDouble(), ti.principalPoint[1].toDouble(), ti.imageDimensions[0], ti.imageDimensions[1])
-                val pose = cam.pose
-                val m = FloatArray(16).also { pose.toMatrix(it, 0) }
+                val rgbPose = FloatArray(16).also { cam.pose.toMatrix(it, 0) }
                 var nv21: ByteArray? = null; var rgbW = 0; var rgbH = 0
                 var rgbStatus = "not-requested"
                 if (pol.taken % SurveyConfig.RGB_EVERY_N_KEYFRAMES == 0) {
@@ -500,8 +538,9 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                         "captured"
                     } catch (_: NotYetAvailableException) { "unavailable: camera image not ready" } catch (e: Exception) { "unavailable: ${e.javaClass.simpleName}" }
                 }
-                val ok = r.submit(Keyframe(depth, confTight, w, h, camK.scaledTo(w, h), camK, m, pose.translation, pose.rotationQuaternion,
-                    depthImg.timestamp, frame.timestamp, nv21, rgbStatus, rgbW, rgbH))
+                val ok = r.submit(Keyframe(depth, confTight, w, h, camK.scaledTo(w, h), camK, rec.matrix, rec.translation, rec.quaternion,
+                    depthImg.timestamp, rec.timestampNs, nv21, rgbStatus, rgbW, rgbH,
+                    rgbTimestampNs = if (nv21 != null) frame.timestamp else 0L, rgbPose = if (nv21 != null) rgbPose else null))
                 if (ok) pol.captured(now)
             } finally { conf?.close() }
         } finally { depthImg.close() }
@@ -531,6 +570,9 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
 
     companion object {
         const val EXTRA_ROOM = "room"
+        const val EXTRA_PROJECT = "projectId"
+        const val EXTRA_ROOM_ID = "roomId"
+        const val EXTRA_ROOM_NAME = "roomName"
 
         /** Quick check before opening the camera screen; UNKNOWN results are treated as "try". */
         fun mayBeSupported(activity: AppCompatActivity): Boolean =

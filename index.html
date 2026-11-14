@@ -1231,11 +1231,11 @@ function openMenu(){
     $('mSearch')&&($('mSearch').oninput=e=>{ const q=e.target.value.toLowerCase(); for(const el of document.querySelectorAll('.projlist .proj')) el.hidden=!el.textContent.toLowerCase().includes(q); });
     $('mLoc').onchange=e=>{ P.location=e.target.value.trim(); saveProject(); };
     $('mCap').onclick=()=>{ closeDialog(); openCapture(); }; $('mNew').onclick=()=>{ saveProject(); P=newProject(); S.undo=[];S.redo=[];S.sel=-1; saveProject(); closeDialog(); setMode('draw'); fit(); };
-    $('mDup').onclick=()=>{ saveProject(); P=JSON.parse(JSON.stringify(P)); P.id='p'+Date.now().toString(36); P.name+=' (copy)'; P.example=false; saveProject(); closeDialog(); syncUi(); };
+    $('mDup').onclick=()=>{ saveProject(); P=JSON.parse(JSON.stringify(P)); P.id='p'+Date.now().toString(36); natStripScans(P); P.name+=' (copy)'; P.example=false; saveProject(); closeDialog(); syncUi(); };
     $('mImp').onclick=()=>$('mFile').click();
-    $('mFile').onchange=async e=>{ try{ const raw=JSON.parse(await e.target.files[0].text()); await restorePhotos(raw); const p=migrate(raw); if(!p.rooms) throw 0; p.id='p'+Date.now().toString(36); P=p; saveProject(); closeDialog(); syncUi(); fit(); toast('Imported '+p.name); }catch(_){ toast('That file is not a LaserPlan project.'); } };
+    $('mFile').onchange=async e=>{ try{ const raw=JSON.parse(await e.target.files[0].text()); await restorePhotos(raw); const p=migrate(raw); if(!p.rooms) throw 0; p.id='p'+Date.now().toString(36); natStripScans(p); P=p; saveProject(); closeDialog(); syncUi(); fit(); toast('Imported '+p.name); }catch(_){ toast('That file is not a LaserPlan project.'); } };
     for(const b of document.querySelectorAll('[data-open]')) b.onclick=()=>{ saveProject(); P=migrate(lsGet(LS_KEY,{})[b.dataset.open]); S.undo=[];S.redo=[];S.sel=-1; lsSet(LS_CUR,P.id); closeDialog(); syncUi(); fit(); };
-    for(const b of document.querySelectorAll('[data-del]')) b.onclick=()=>{ if(b.dataset.armed){ const a=lsGet(LS_KEY,{}); delete a[b.dataset.del]; lsSet(LS_KEY,a); openMenu(); } else { b.dataset.armed=1; b.textContent='Delete?'; } };
+    for(const b of document.querySelectorAll('[data-del]')) b.onclick=()=>{ if(b.dataset.armed){ const a=lsGet(LS_KEY,{}); if(NAT.on&&Object.values(a[b.dataset.del]&&a[b.dataset.del].rooms||[]).some(q=>q.scans&&q.scans.length)) toast('Its 3D scans were deleted from this phone too.'); natSend({cmd:'scans.deleteProject',projectId:b.dataset.del}); delete a[b.dataset.del]; lsSet(LS_KEY,a); openMenu(); } else { b.dataset.armed=1; b.textContent='Delete?'; } };
     for(const b of document.querySelectorAll('[data-ex]')) b.onclick=()=>exportAs(b.dataset.ex); });
 }
 let toastT; function toast(msg){ let t=document.querySelector('.toast'); if(!t){t=document.createElement('div');t.className='toast';t.setAttribute('role','status');document.body.appendChild(t)} t.textContent=msg; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,3400); }
@@ -1526,7 +1526,7 @@ function panelRoom(pb){
     <label class="toggle">Open terrace above (parapet + waterproofing)<input type="checkbox" id="rTer" ${r.terrace?'checked':''}></label>
     <label class="toggle">Room measurement complete ✓<input type="checkbox" id="rDone" ${r.done?'checked':''}></label>
     <label class="toggle">Skirting<input type="checkbox" id="rSk" ${r.skirting?'checked':''}></label>
-    <div class="field"><label for="rFl">Flooring</label><select id="rFl">${FLOORING.map(f=>`<option ${f===r.flooring?'selected':''}>${f}</option>`).join('')}</select></div></div>${v11GenHTML(r)}${v12RoomHTML(r)}
+    <div class="field"><label for="rFl">Flooring</label><select id="rFl">${FLOORING.map(f=>`<option ${f===r.flooring?'selected':''}>${f}</option>`).join('')}</select></div></div>${v11GenHTML(r)}${v12RoomHTML(r)}${natScansHTML(r)}
   <div class="grp"><h3>Measured size</h3><div class="stats">
     <div class="stat"><span>Floor area</span><b>${r.closed?fmtArea(area):'—'}</b></div><div class="stat"><span>Perimeter</span><b>${n?fmt(per):'—'}</b></div>
     <div class="stat"><span>Wall face area</span><b>${n?fmtArea(per*r.height):'—'}</b></div><div class="stat"><span>Volume</span><b>${r.closed?fmtVol(area*r.height):'—'}</b></div>
@@ -1552,7 +1552,7 @@ function panelRoom(pb){
   $('rUse').onchange=e=>mutate(()=>r.use=e.target.value);
   bindLen('rH',v=>mutate(()=>r.height=v));
   for(const [id,k] of [['rCeil','ceilPlaster'],['rSlab','slab'],['rTer','terrace'],['rSk','skirting'],['rDone','done']]) $(id).onchange=e=>mutate(()=>r[k]=e.target.checked);
-  $('rFl').onchange=e=>mutate(()=>r.flooring=e.target.value); v11GenWire(r); v12RoomWire(r);
+  $('rFl').onchange=e=>mutate(()=>r.flooring=e.target.value); v11GenWire(r); v12RoomWire(r); natScansWire(r);
   for(const k of (r.closed&&n>=4?diagNeeded(r):[])) bindLen('dg'+k,v=>{ r.diags=r.diags||{}; r.diags[k]=v; saveProject(); draw(); });
   $('dgApply')&&($('dgApply').onclick=()=>{ for(const k of diagNeeded(r)){ const v=parseLen($('dg'+k).value,P.unit); if(v>0){ r.diags=r.diags||{}; r.diags[k]=v; } }
     if(r.walls.some(w=>!w.m)) toast('Some walls are still estimates; the shape uses their current lengths.');
@@ -3950,6 +3950,7 @@ function natOn(m){ if(!m||typeof m!=='object') return;
     const src='laser:'+String(m.adapter||'native').slice(0,40), mm=+m.m;
     if(lzWants(src)) lzReading({v,u,src}); else if(mm>0&&isFinite(mm)) onDistanceLegacy(mm,src); }
   else if(m.type==='ar.room') natArRoom(m);
+  else if(m.type==='scan.saved') natScanSaved(m);
   else if(m.type==='toast'&&m.text) toast(String(m.text).slice(0,300));
   else if(m.type==='saved') toast(m.ok?`Saved ${m.name||'file'}.`:`Not saved${m.error?': '+m.error:''}.`); }
 /* Native ARCore result ("laserplan.ar-room" v1): validate, then build the room through the same capToRoom() as WebXR. */
@@ -3958,10 +3959,36 @@ function natArRoom(m){ const ok=m.schema==='laserplan.ar-room'&&m.version===1&&A
   if(!ok){ toast('AR result ignored: it was not a valid room outline.'); return null; }
   const h=isFinite(m.height)&&m.height>1.8&&m.height<8?+m.height:null;
   const r=capToRoom(m.plan.map(q=>({x:+q.x,y:+q.y})),{src:'arcore',height:h}); if(!r) return null;
+  const ids=(Array.isArray(m.scans)?m.scans:[]).filter(natSafe); ids.forEach(id=>NAT.claim[id]=r.id); if(ids.length) natMoveScans(ids,r);
   mutate(()=>{ r.capture.native={schema:m.schema,version:m.version,captureTime:+m.captureTime||Date.now(),heightSource:h?String(m.heightSource||'ar').slice(0,20):null,
     depthUsed:!!m.depthUsed,trackingLosses:+m.trackingLosses||0,corners3d:(Array.isArray(m.corners)?m.corners:[]).slice(0,64).map(c=>[+c.x,+c.y,+c.z,String(c.src||'').slice(0,16)]),
     metrics:m.metrics&&typeof m.metrics==='object'?{area:+m.metrics.area||0,perimeter:+m.metrics.perimeter||0}:null}; });
   return r; }
+/* ---------- 3D scans belong to a project and a room (Phase A) ---------- */
+NAT.claim={};
+const natSafe=id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(id);
+function natMoveScans(ids,to){ mutate(()=>{ for(const rr of P.rooms){ if(rr===to||!rr.scans) continue; const mv=rr.scans.filter(s=>ids.includes(s.id)); if(!mv.length) continue;
+    rr.scans=rr.scans.filter(s=>!ids.includes(s.id)); to.scans=(to.scans||[]).concat(mv); } }); }
+function natScanSaved(m){ if(!natSafe(m.projectId)||!natSafe(m.scanId)) return;
+  const ref={id:m.scanId,date:+m.date||Date.now(),frames:+m.frames||0,valid:+m.validFrames||0,points:+m.points||0,bytes:+m.bytes||0};
+  const put=proj=>{ const rid=NAT.claim[m.scanId]||m.roomId; const room=proj.rooms.find(q=>q.id===rid)||proj.rooms.find(q=>q.id===m.roomId); if(!room) return false;
+    room.scans=(room.scans||[]).filter(s=>s.id!==ref.id); room.scans.push(ref); return room; };
+  if(P&&m.projectId===P.id){ let room=null; mutate(()=>{ room=put(P); }); if(room) toast(`3D scan saved to ${room.name}.`); return; }
+  const all=lsGet(LS_KEY,{}), proj=all[m.projectId]; if(proj&&put(proj)){ lsSet(LS_KEY,all); } }
+function natScansHTML(r){ if(!NAT.on) return ''; const L=r.scans||[];
+  const mb=b=>(b/1048576).toFixed(1)+' MB', when=t=>new Date(t).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  return `<div class="field"><label>3D scans of this room</label>${L.length?L.map(s=>`<div class="row" style="align-items:center"><span class="lzsmall" style="flex:1">${esc(when(s.date))} · ${s.valid}/${s.frames} frames · ${(s.points/1000).toFixed(0)}k points · ${mb(s.bytes)}</span>
+    <button class="btn sm" data-scv="${esc(s.id)}">View</button><button class="btn sm" data-sce="${esc(s.id)}">Export</button><button class="btn sm danger" data-scd="${esc(s.id)}">Delete</button></div>`).join('')
+    :'<p class="lzsmall">No 3D scan yet. Capture room shape → Start AR → ● Record 3D. The scan is kept with this room.</p>'}
+    ${L.length?`<p class="lzsmall">Total for this room: ${mb(L.reduce((a,s)=>a+s.bytes,0))}. Scans stay on this phone.</p>`:''}</div>`; }
+function natScansWire(r){ if(!NAT.on) return;
+  for(const b of document.querySelectorAll('[data-scv]')) b.onclick=()=>natSend({cmd:'scan.view',projectId:P.id,scanId:b.dataset.scv});
+  for(const b of document.querySelectorAll('[data-sce]')) b.onclick=()=>natSend({cmd:'scan.export',projectId:P.id,scanId:b.dataset.sce});
+  for(const b of document.querySelectorAll('[data-scd]')) b.onclick=()=>{ if(!b.dataset.armed){ b.dataset.armed=1; b.textContent='Delete?'; return; }
+    const id=b.dataset.scd; natSend({cmd:'scan.delete',projectId:P.id,scanId:id}); mutate(()=>{ r.scans=(r.scans||[]).filter(s=>s.id!==id); }); toast('3D scan deleted.'); }; }
+/* A copied or imported project has no scan files of its own: drop the references. */
+function natStripScans(p){ for(const r of (p&&p.rooms)||[]) delete r.scans; return p; }
+
 function natInit(){ const L=window.LPNative; NAT.on=!!(L&&typeof L.postMessage==='function'); if(!NAT.on) return;
   L.onmessage=ev=>{ let m=null; try{ m=JSON.parse(ev.data); }catch(_){ return; } natOn(m); };
   document.documentElement.classList.add('native');
@@ -3984,7 +4011,8 @@ function natInit(){ const L=window.LPNative; NAT.on=!!(L&&typeof L.postMessage==
       if(!natSend({cmd:'save',name:String(name).replace(/[\\/:*?"<>|]+/g,'_').slice(0,120),mime:blob.type||'application/octet-stream',b64})) toast('Could not hand the file to Android.'); };
     fr.onerror=()=>toast('Could not read the file to save.'); fr.readAsDataURL(blob); };
   arSupported=async function(){ return true; }; arOrigin=function(){ return {pr:'https:',https:true,label:'LaserPlan app'}; };
-  arStart=async function(){ natSend({cmd:'ar.open'}); }; arHandoff=function(){ natSend({cmd:'ar.open'}); };
+  const arOpen=()=>{ const r=R(); natSend({cmd:'ar.open',projectId:P.id,roomId:r?r.id:'',roomName:r?String(r.name||'').slice(0,60):''}); };
+  arStart=async function(){ arOpen(); }; arHandoff=function(){ arOpen(); };
   window.lpNativeBack=()=>{ if($('dlgRoot').innerHTML){ closeDialog(); return 'handled'; } if(document.querySelector('.ov.show,#arOv.show')){ try{ arClose&&arClose(); }catch(_){} return 'handled'; } return 'exit'; };
   natSend({cmd:'hello',v:13}); NAT.hello=true; }
 

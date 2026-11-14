@@ -35,6 +35,11 @@ class Keyframe(
     val rgbStatus: String,                // "captured", "not-requested", "unavailable: <reason>"
     val rgbWidth: Int = 0,
     val rgbHeight: Int = 0,
+    /** Camera frame the RGB image (if any) came from, and its pose – for colouring points later. */
+    val rgbTimestampNs: Long = 0,
+    val rgbPose: FloatArray? = null,
+    /** Where the depth pose came from. */
+    val poseSource: String = "frame at depth timestamp",
 )
 
 /**
@@ -107,7 +112,7 @@ class SurveyRecorder(
                 .put("matrixColumnMajor", JSONArray(k.pose.map { it.toDouble() }))
                 .put("translation", JSONArray(k.poseTranslation.map { it.toDouble() }))
                 .put("quaternionXYZW", JSONArray(k.poseQuaternion.map { it.toDouble() }))
-                .put("source", "Camera.getPose() – camera sensor frame, ARCore world"))
+                .put("source", "Camera.getPose() of the camera frame the depth image belongs to (" + k.poseSource + "), ARCore world"))
             put("depth", JSONObject().put("file", "depth/$id.raw16le").put("width", k.width).put("height", k.height)
                 .put("format", "uint16 little-endian, millimetres along the optical axis, 0 = no value, row-major tight"))
             put("confidence", if (k.confidence == null) JSONObject.NULL else JSONObject().put("file", "confidence/$id.raw8")
@@ -115,7 +120,8 @@ class SurveyRecorder(
             put("intrinsics", JSONObject().put("camera", k.cameraIntrinsics.toJson()).put("depth", k.depthIntrinsics.toJson())
                 .put("note", "depth intrinsics = camera texture intrinsics scaled to the depth image size"))
             put("rgb", JSONObject().put("status", rgbStatus).apply {
-                if (jpeg != null) { put("file", "rgb/$id.jpg"); put("width", k.rgbWidth); put("height", k.rgbHeight) }
+                if (jpeg != null) { put("file", "rgb/$id.jpg"); put("width", k.rgbWidth); put("height", k.rgbHeight)
+                    put("cameraTimestampNs", k.rgbTimestampNs); k.rgbPose?.let { p -> put("poseMatrixColumnMajor", JSONArray(p.map { it.toDouble() })) } }
             })
             put("pixels", stats.toJson())
         }

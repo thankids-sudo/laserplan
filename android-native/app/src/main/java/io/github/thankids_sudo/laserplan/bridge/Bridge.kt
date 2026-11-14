@@ -15,7 +15,11 @@ sealed class WebCommand {
     data object LaserOpen : WebCommand()
     data object LaserReconnect : WebCommand()
     data object LaserDisconnect : WebCommand()
-    data object ArOpen : WebCommand()
+    data class ArOpen(val projectId: String?, val roomId: String?, val roomName: String) : WebCommand()
+    data class ScanView(val projectId: String, val scanId: String) : WebCommand()
+    data class ScanExport(val projectId: String, val scanId: String) : WebCommand()
+    data class ScanDelete(val projectId: String, val scanId: String) : WebCommand()
+    data class ScansDeleteProject(val projectId: String) : WebCommand()
     data class Save(val name: String, val mime: String, val base64: String) : WebCommand()
 }
 
@@ -33,7 +37,14 @@ object Bridge {
             "laser.open" -> WebCommand.LaserOpen
             "laser.reconnect" -> WebCommand.LaserReconnect
             "laser.disconnect" -> WebCommand.LaserDisconnect
-            "ar.open" -> WebCommand.ArOpen
+            "ar.open" -> WebCommand.ArOpen(id(o, "projectId"), id(o, "roomId"), o.optString("roomName").take(60))
+            "scan.view", "scan.export", "scan.delete" -> {
+                val p = id(o, "projectId"); val s = id(o, "scanId")
+                if (p == null || s == null) null else when (o.optString("cmd")) {
+                    "scan.view" -> WebCommand.ScanView(p, s); "scan.export" -> WebCommand.ScanExport(p, s); else -> WebCommand.ScanDelete(p, s)
+                }
+            }
+            "scans.deleteProject" -> id(o, "projectId")?.let { WebCommand.ScansDeleteProject(it) }
             "save" -> {
                 val name = o.optString("name").trim().replace(Regex("""[^\w\-. ()\[\]]"""), "_").take(120)
                 val mime = o.optString("mime", "application/octet-stream")
@@ -44,6 +55,9 @@ object Bridge {
             else -> null
         }
     }
+
+    private val safeId = Regex("^[A-Za-z0-9_-]{1,64}$")
+    private fun id(o: JSONObject, k: String): String? = o.optString(k).takeIf { safeId.matches(it) }
 
     fun stateMessage(s: LaserUiState): String = JSONObject().apply {
         put("type", "state")

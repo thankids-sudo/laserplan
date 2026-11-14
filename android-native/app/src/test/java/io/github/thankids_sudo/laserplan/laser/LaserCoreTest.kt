@@ -114,6 +114,17 @@ class BridgeTest {
         assertNull(Bridge.parse("""{"cmd":"save","name":"a.json","mime":"bad mime!","b64":"QUJD"}"""))
         assertNull(Bridge.parse("""{"cmd":"save","name":"a.json","mime":"application/json","b64":""}"""))
     }
+
+    @Test fun scanCommandsCarrySafeIdsOnly() {
+        val a = Bridge.parse("""{"cmd":"ar.open","projectId":"pmhx3k2","roomId":"r12","roomName":"Kitchen"}""") as WebCommand.ArOpen
+        assertEquals("pmhx3k2", a.projectId); assertEquals("r12", a.roomId); assertEquals("Kitchen", a.roomName)
+        val b = Bridge.parse("""{"cmd":"ar.open","projectId":"../etc","roomId":"r1"}""") as WebCommand.ArOpen
+        assertNull(b.projectId)                                           // path tricks never reach the file system
+        assertEquals(WebCommand.ScanView("p1", "s20261114-130634"), Bridge.parse("""{"cmd":"scan.view","projectId":"p1","scanId":"s20261114-130634"}"""))
+        assertEquals(WebCommand.ScanDelete("p1", "s1"), Bridge.parse("""{"cmd":"scan.delete","projectId":"p1","scanId":"s1"}"""))
+        assertNull(Bridge.parse("""{"cmd":"scan.delete","projectId":"p1","scanId":"../../x"}"""))
+        assertEquals(WebCommand.ScansDeleteProject("p1"), Bridge.parse("""{"cmd":"scans.deleteProject","projectId":"p1"}"""))
+    }
 }
 
 class CompatibilityRegistryTest {

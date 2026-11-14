@@ -32,7 +32,12 @@ import io.github.thankids_sudo.laserplan.bridge.WebCommand
 import io.github.thankids_sudo.laserplan.laser.HidKeyCollector
 import io.github.thankids_sudo.laserplan.laser.LaserManager
 import io.github.thankids_sudo.laserplan.laser.diagnostics.Diagnostics
+import io.github.thankids_sudo.laserplan.survey.ScanEvents
+import io.github.thankids_sudo.laserplan.survey.ScanStore
+import io.github.thankids_sudo.laserplan.survey.SurveyRecorder
+import io.github.thankids_sudo.laserplan.survey.SurveyViewerActivity
 import io.github.thankids_sudo.laserplan.ui.LaserActivity
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,7 +77,26 @@ class MainActivity : AppCompatActivity() {
     private val arRoom = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val json = res.data?.getStringExtra(ArRoomActivity.EXTRA_ROOM)
         if (res.resultCode == RESULT_OK && json != null) post(json)
-        else post(Bridge.toast("AR capture closed – nothing was added."))
+        else post(Bridge.toast("AR capture closed – no room outline was added."))
+        ScanEvents.drain(::post)
+    }
+
+    private var pendingZip: File? = null
+    private val saveZip = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val dir = pendingZip ?: return@registerForActivityResult
+        pendingZip = null
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val err = withContext(Dispatchers.IO) {
+                runCatching { contentResolver.openOutputStream(uri)?.use { SurveyRecorder.zip(dir, it) } ?: error("Could not open the file") }.exceptionOrNull()
+            }
+            post(Bridge.toast(err?.let { "Export failed: ${it.message}" } ?: "3D scan ZIP saved."))
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (reply != null) ScanEvents.drain(::post)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -151,11 +175,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun handle(cmd: WebCommand) {
         when (cmd) {
-            WebCommand.Hello -> post(Bridge.stateMessage(LaserManager.state.value))
+            WebCommand.Hello -> { post(Bridge.stateMessage(LaserManager.state.value)); ScanEvents.drain(::post) }
             WebCommand.LaserOpen -> startActivity(Intent(this, LaserActivity::class.java))
             WebCommand.LaserReconnect -> if (!LaserManager.reconnectPreferred()) startActivity(Intent(this, LaserActivity::class.java))
             WebCommand.LaserDisconnect -> LaserManager.disconnect()
-            WebCommand.ArOpen -> arRoom.launch(Intent(this, ArRoomActivity::class.java))
+            is WebCommand.ArOpen -> arRoom.launch(Intent(this, ArRoomActivity::class.java)
+                .putExtra(ArRoomActivity.EXTRA_PROJECT, cmd.projectId).putExtra(ArRoomActivity.EXTRA_ROOM_ID, cmd.roomId)
+                .putExtra(ArRoomActivity.EXTRA_ROOM_NAME, cmd.roomName))
+            is WebCommand.ScanView -> ScanStore.scanDir(this, cmd.projectId, cmd.scanId)?.takeIf { it.isDirectory }?.let {
+                startActivity(Intent(this, SurveyViewerActivity::class.java).putExtra(SurveyViewerActivity.EXTRA_DIR, it.absolutePath))
+            } ?: post(Bridge.toast("That 3D scan is no longer on this phone."))
+            is WebCommand.ScanExport -> ScanStore.scanDir(this, cmd.projectId, cmd.scanId)?.takeIf { File(it, "manifest.json").isFile }?.let {
+                pendingZip = it; saveZip.launch("LaserPlan-scan-${cmd.scanId}.zip")
+            } ?: post(Bridge.toast("That 3D scan is no longer on this phone."))
+            is WebCommand.ScanDelete -> lifecycleScope.launch(Dispatchers.IO) { ScanStore.delete(this@MainActivity, cmd.projectId, cmd.scanId) }
+            is WebCommand.ScansDeleteProject -> lifecycleScope.launch(Dispatchers.IO) { ScanStore.deleteProject(this@MainActivity, cmd.projectId) }
             is WebCommand.Save -> {
                 pendingSave = cmd
                 val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)

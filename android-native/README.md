@@ -90,6 +90,24 @@ These controls are on the AR screen, above the corner-capture buttons, and were 
 
 **Accuracy:** phone AR depth is estimate-grade (centimetres, worse at range and on plain, dark or shiny surfaces). The S24 Ultra has no LiDAR, so depth comes from ARCore's motion stereo. Compare against laser readings before trusting any dimension.
 
+### v13.4 – scans belong to the project; pose fix
+
+**Field finding.** In the first two S24 Ultra scans (14 Nov 2026), ARCore's raw depth image belonged to an earlier camera frame:
+- the gap was a median of 97 ms and 114 ms, and up to 3.7 s;
+- v13.2 placed each depth image with the *current* pose, and rejected any frame more than 50 ms apart;
+- as a result only 19 of 90 and 15 of 90 keyframes were used.
+
+**Fix.** `PoseHistory` keeps the last 3 s of camera poses by frame timestamp. Each depth image is placed with the pose of its own frame, found within 2 ms. A repeated or too-old depth image is skipped and never guessed. Offline reprocessing of those two scans with poses at depth time used 86 and 90 frames and gave a recognisable room outline. The confidence cut-off was raised from 128 to 200, which gave cleaner walls on the same data.
+
+**Storage.** Scans now live in `files/projects/<projectId>/scans/<scanId>/`, with `owner.json` recording the project and room.
+- They are kept until deleted; there is no automatic pruning.
+- Recording refuses to start when less than 500 MB is free.
+- The plan stores a small reference per room (`room.scans`: id, date, frames, valid frames, points, bytes). The room panel lists the scans with **View / Export / Delete**.
+- AR is opened with the project and room ids, and **View 3D** in AR only shows this project's scans.
+- Finishing a room in the same AR session moves the session's scans to the new room.
+- Deleting a project deletes its scan folder. Duplicated or imported projects drop scan references, because they have no scan files of their own.
+- Events from the AR screen ("scan saved") are queued and delivered once the plan is visible again.
+
 ## Universal Laser Connectivity Engine (ULCE)
 
 ```
