@@ -10,7 +10,7 @@ object SurveyConfig {
     const val MAX_KEYFRAMES = 90                  // per session
     const val RGB_EVERY_N_KEYFRAMES = 3           // JPEG on keyframes 1, 4, 7 …
     const val JPEG_QUALITY = 85
-    const val MIN_CONFIDENCE = 128                // raw-depth confidence byte, 0–255 (≈ 0.5)
+    const val MIN_CONFIDENCE = 200                // raw-depth confidence byte, 0–255 (≈ 0.78; chosen from the first S24 Ultra scans)
     const val MAX_RANGE_M = 5.0                   // farther raw depth is too noisy for a room survey
     const val VOXEL_M = 0.02                      // 2 cm voxel reduction of the processed cloud
     const val MAX_VOXELS = 600_000                // memory cap for the processed cloud
@@ -180,6 +180,29 @@ class VoxelGrid(private val voxel: Double = SurveyConfig.VOXEL_M, private val ma
         for (i in 0 until maxN) { val src = (i.toLong() * n / maxN).toInt(); System.arraycopy(all, src * 4, out, i * 4, 4) }
         return out
     }
+}
+
+/**
+ * Recent camera poses by frame timestamp. ARCore's raw depth image usually belongs to an earlier camera frame
+ * (in the first field test a median of 97 ms, up to seconds, earlier), so its points must be placed with the pose of
+ * THAT frame, not the current one. Pure, unit-tested; used on the GL thread only.
+ */
+class PoseHistory(private val keepNs: Long = 3_000_000_000L) {
+    class Rec(val timestampNs: Long, val matrix: FloatArray, val translation: FloatArray, val quaternion: FloatArray)
+    private val recs = ArrayDeque<Rec>()
+
+    fun add(r: Rec) {
+        if (recs.isNotEmpty() && r.timestampNs <= recs.last().timestampNs) return
+        recs.addLast(r)
+        while (recs.isNotEmpty() && r.timestampNs - recs.first().timestampNs > keepNs) recs.removeFirst()
+    }
+
+    fun clear() = recs.clear()
+    val size get() = recs.size
+
+    /** The pose recorded at [timestampNs] (within [toleranceNs]), or null when it is not in the history. */
+    fun find(timestampNs: Long, toleranceNs: Long = 2_000_000L): Rec? =
+        recs.minByOrNull { abs(it.timestampNs - timestampNs) }?.takeIf { abs(it.timestampNs - timestampNs) <= toleranceNs }
 }
 
 /** When to take the next keyframe. Pure, unit-tested. */

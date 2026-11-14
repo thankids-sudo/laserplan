@@ -32,7 +32,7 @@ class SurveyViewerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val path = intent.getStringExtra(EXTRA_DIR)
-        val root = File(cacheDir, ROOT)
+        val root = ScanStore.root(this)
         dir = path?.let(::File)?.takeIf { it.canonicalPath.startsWith(root.canonicalPath) } ?: root
         view = PointCloudView(this)
         val bar = LinearLayout(this).apply {
@@ -60,6 +60,5 @@ class SurveyViewerActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_DIR = "dir"
-        const val ROOT = "surveys"
     }
 }

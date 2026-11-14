@@ -59,9 +59,13 @@ class DepthMathTest {
         val conf = byteArrayOf(-1, 50, -1, -1, -1, -1, -1, -128)            // 255,50,255,255,255,255,255,128
         val st = PixelStats()
         val pts = DepthMath.framePoints(depth, conf, 4, 2, k, IDENTITY, st)
-        assertEquals(8, st.total); assertEquals(1, st.invalid); assertEquals(1, st.lowConfidence); assertEquals(1, st.outOfRange)
-        assertEquals(5, st.accepted); assertEquals(5 * 4, pts.size)
-        for (i in 0 until 5) { assertTrue(pts[i * 4 + 2] < 0); assertTrue(pts[i * 4 + 3] in 0.5f..1f) }
+        // Default cut-off is 200: the pixel with confidence 128 is now rejected too.
+        assertEquals(8, st.total); assertEquals(1, st.invalid); assertEquals(2, st.lowConfidence); assertEquals(1, st.outOfRange)
+        assertEquals(4, st.accepted); assertEquals(4 * 4, pts.size)
+        for (i in 0 until 4) { assertTrue(pts[i * 4 + 2] < 0); assertTrue(pts[i * 4 + 3] >= 200 / 255f) }
+        val st128 = PixelStats()
+        DepthMath.framePoints(depth, conf, 4, 2, k, IDENTITY, st128, minConfidence = 128)
+        assertEquals(5, st128.accepted)
     }
 
     @Test fun noConfidenceImageMeansNoConfidenceFilter() {
@@ -100,6 +104,28 @@ class VoxelGridTest {
         assertEquals(100 * 4, g.sample(100).size)
         assertArrayEquals(g.sample(100), g.sample(100), 0f)
         assertEquals(1000 * 4, g.sample(5000).size)
+    }
+}
+
+class PoseHistoryTest {
+    private fun rec(ts: Long, x: Float) = PoseHistory.Rec(ts, IDENTITY.copyOf().also { it[12] = x }, floatArrayOf(x, 0f, 0f), floatArrayOf(0f, 0f, 0f, 1f))
+
+    @Test fun findsThePoseOfTheDepthFrame() {
+        val h = PoseHistory()
+        for (i in 0 until 60) h.add(rec(1_000_000_000L + i * 33_333_333L, i.toFloat()))   // 30 fps for 2 s
+        // Depth from 97 ms (≈ 3 frames) ago, as in the first S24 Ultra scan
+        val depthTs = 1_000_000_000L + 56 * 33_333_333L
+        assertEquals(56f, h.find(depthTs)!!.matrix[12])
+        assertNull(h.find(depthTs + 10_000_000L))            // 10 ms off any frame → no guess
+    }
+
+    @Test fun dropsOldAndOutOfOrderPoses() {
+        val h = PoseHistory(keepNs = 1_000_000_000L)
+        h.add(rec(0L, 0f)); h.add(rec(500_000_000L, 1f)); h.add(rec(400_000_000L, 9f))   // out of order: ignored
+        assertEquals(2, h.size)
+        h.add(rec(1_400_000_000L, 2f))                                                       // first is now 1.4 s old: trimmed
+        assertNull(h.find(0L)); assertEquals(1f, h.find(500_000_000L)!!.matrix[12])
+        h.clear(); assertEquals(0, h.size)
     }
 }
 
