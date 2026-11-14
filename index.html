@@ -3971,6 +3971,14 @@ function natInit(){ const L=window.LPNative; NAT.on=!!(L&&typeof L.postMessage==
   lzReconnect=async function(){ if(LZ.meter&&LZ.meter.kind==='sim') return _lzReconnect(); LZ.session=true; lzSetState('busy'); natSend({cmd:'laser.reconnect'}); };
   lzEnd=function(){ if(LZ.meter&&LZ.meter.kind==='native') natSend({cmd:'laser.disconnect'}); return _lzEnd(); };
   btDisconnect=function(){ if(LZ.meter&&LZ.meter.kind==='native'){ natSend({cmd:'laser.disconnect'}); setBt('off'); return; } return _btDisconnect(); };
+  /* The plan's own laser windows check for Web Bluetooth, which the app's WebView never has. In the app, Bluetooth is
+     native, so report it as available, label it honestly, and send the diagnostics window to the native screen. */
+  lzEnv=function(){ return {secure:true,api:true,framed:false,policy:true,native:true,ok:true,ua:navigator.userAgent}; };
+  const _openLaserPicker=openLaserPicker;
+  openLaserPicker=function(){ _openLaserPicker(); const p=document.querySelector('#dlgRoot .lzsmall');
+    if(p) p.textContent='Bluetooth: native, inside the LaserPlan app ✓ · "Search & connect" opens the Laser meters screen (Bosch, Leica DISTO, keyboard-mode meters and more).';
+    for(const b of document.querySelectorAll('#dlgRoot [data-mc]')){ if(b.dataset.mc!=='sim') b.textContent='Search & connect (native)'; } };
+  openBtDialog=function(){ natSend({cmd:'laser.open'}); };
   btConnect=function(){ return lzConnect(P.settings.lzMeter&&P.settings.lzMeter!=='sim'?P.settings.lzMeter:'native'); };
   download=function(name,blob){ const fr=new FileReader(); fr.onload=()=>{ const s=String(fr.result), b64=s.slice(s.indexOf(',')+1);
       if(!natSend({cmd:'save',name:String(name).replace(/[\\/:*?"<>|]+/g,'_').slice(0,120),mime:blob.type||'application/octet-stream',b64})) toast('Could not hand the file to Android.'); };
