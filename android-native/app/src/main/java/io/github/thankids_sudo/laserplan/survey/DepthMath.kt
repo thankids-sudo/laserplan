@@ -201,7 +201,8 @@ class PoseHistory(private val keepNs: Long = 3_000_000_000L) {
     val size get() = recs.size
 
     /** The pose recorded at [timestampNs] (within [toleranceNs]), or null when it is not in the history. */
-    fun find(timestampNs: Long, toleranceNs: Long = 2_000_000L): Rec? =
+    /** Field data (S24 Ultra): depth stamps sit 1.9–2.0 ms from their frame; frames are ~33 ms apart, so 8 ms is unambiguous. */
+    fun find(timestampNs: Long, toleranceNs: Long = 8_000_000L): Rec? =
         recs.minByOrNull { abs(it.timestampNs - timestampNs) }?.takeIf { abs(it.timestampNs - timestampNs) <= toleranceNs }
 }
 

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.onEach
 import java.util.UUID
 
 /** One adapter per protocol family. Selected by verified service UUIDs or name patterns, or by explicit user choice. */
@@ -106,6 +107,12 @@ class BoschGlmAdapter(context: Context) : BleAdapter(context) {
 
     override fun decode(bytes: ByteArray) = BoschMtProtocol.decode(bytes)
     override suspend fun afterSubscribe() = ble.write(service, notifyCharacteristic, BoschMtProtocol.CMD_AUTO_SYNC)
+
+    /** Same as the base pipeline, but every request frame from the meter gets the "OK" reply it waits for. */
+    override fun measurements(): Flow<LaserMeasurement> = ble.notifications
+        .filter { it.characteristic == notifyCharacteristic }
+        .onEach { p -> if (BoschMtProtocol.needsAck(p.bytes)) runCatching { ble.write(service, notifyCharacteristic, BoschMtProtocol.ACK) } }
+        .mapNotNull { p -> decode(p.bytes)?.let { measurementOf(this, device, it, p.bytes) } }
     override suspend fun getCapabilities() = LaserCapabilities(notes = "Auto-sync: every measurement taken on the meter is sent. Distance in metres.")
 }
 
