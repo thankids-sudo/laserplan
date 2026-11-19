@@ -248,7 +248,7 @@ class PhaseBTest {
         // Camera moved to x = 1: the same world point now projects 50 px further left.
         val moved = IDENTITY.copyOf().also { it[12] = 1f }
         val img = nv21(100, 80, 200, 128, 128); img[40 * 100 + 10] = 10
-        assertEquals(0x0A0A0A, ColorSampler(img, 100, 80, k, moved).colourAt(0.2f, 0f, -2f))   // u = 100·(−0.8)/2 + 50 = 10
+        assertEquals(0x0A0A0A, ColorSampler(img, 100, 80, k, moved).colourAt(0.21f, 0f, -2f))   // u = 100·(−0.79)/2 + 50 = 10.5 → pixel 10 (off the pixel edge)
     }
 
     @Test fun voxelColoursAverageAndUncolouredStayUnknown() {
