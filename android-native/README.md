@@ -108,6 +108,18 @@ These controls are on the AR screen, above the corner-capture buttons, and were 
 - Deleting a project deletes its scan folder. Duplicated or imported projects drop scan references, because they have no scan files of their own.
 - Events from the AR screen ("scan saved") are queued and delivered once the plan is visible again.
 
+v13.5 widened the pose match to 8 ms (field data: depth stamps sit 1.9–2.0 ms from their frame, frames are ~33 ms apart).
+
+### v13.6 – clearer scans (Phase B, step 1)
+
+- **Photo colour.** Every keyframe's camera image (NV21, with its own intrinsics and pose) colours the depth points that project into it (BT.601). Each voxel keeps the average colour of every photo that saw it. Occlusion is not checked; the averaging smooths occasional wrong samples. Points no photo saw stay uncoloured (grey in exports). A JPEG is saved only every 3rd keyframe to keep the ZIP size down.
+- **Keyframes follow movement.** A keyframe is taken after 10 cm of movement or 10° of turn, at most every 250 ms. Standing still gives one every 1.5 s. Up to 300 keyframes.
+- **Stray-point filter.** On Stop, voxels (2 cm) with fewer than 3 of their 26 neighbours occupied are dropped (only for clouds of 500+ voxels). The manifest records `pointsBeforeStrayFilter` and `colouredPoints`. The raw depth files are unchanged, so the filter can be redone.
+- **Outputs.** `cloud.xyzc` (filtered) and `cloud.ply` (ASCII, x y z, red green blue, confidence; opens in MeshLab or CloudCompare). The viewer's `preview5.bin` is internal and not exported.
+- **Live coverage.** While recording, the AR screen shows the last ~4,000 captured points as green dots, so missed areas are visible.
+- **Viewer.** OpenGL viewer with round, depth-tested points in photo colour or height colour. Drag rotates, pinch zooms, double tap resets. There are **Points −/+** buttons and axis lines. Older scans open in height colour.
+- It is still a point cloud of measured points: no mesh, no gap filling. Mesh/TSDF surfaces come in a later step.
+
 ## Universal Laser Connectivity Engine (ULCE)
 
 ```

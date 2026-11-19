@@ -38,6 +38,10 @@ class Keyframe(
     /** Camera frame the RGB image (if any) came from, and its pose – for colouring points later. */
     val rgbTimestampNs: Long = 0,
     val rgbPose: FloatArray? = null,
+    /** Intrinsics of the RGB (CPU) image, needed to colour points from it. */
+    val rgbIntrinsics: Intrinsics? = null,
+    /** Save this RGB image as JPEG (every Nth keyframe); otherwise it is only used for colour. */
+    val saveJpeg: Boolean = true,
     /** Where the depth pose came from. */
     val poseSource: String = "frame at depth timestamp",
 )
@@ -61,6 +65,14 @@ class SurveyRecorder(
     val validFrames = AtomicInteger(0)
     val skippedBusy = AtomicInteger(0)
     @Volatile var points = 0
+        private set
+    /** Recent world points (x,y,z packed) for the live coverage dots on the camera view. */
+    @Volatile var live: FloatArray = FloatArray(0)
+        private set
+    private val liveRing = FloatArray(SurveyConfig.LIVE_POINTS * 3)
+    private var liveAt = 0
+    private var liveCount = 0
+    @Volatile var colouredPoints = 0L
         private set
     @Volatile var finished = false
         private set
@@ -86,10 +98,11 @@ class SurveyRecorder(
         val id = "%04d".format(n)
         File(dir, "depth/$id.raw16le").writeBytes(k.depth)
         k.confidence?.let { File(dir, "confidence/$id.raw8").writeBytes(it) }
-        val jpeg = k.rgbNv21?.let { runCatching { jpegEncoder?.invoke(it, k.rgbWidth, k.rgbHeight) }.getOrNull() }
+        val jpeg = if (!k.saveJpeg) null else k.rgbNv21?.let { runCatching { jpegEncoder?.invoke(it, k.rgbWidth, k.rgbHeight) }.getOrNull() }
         jpeg?.let { File(dir, "rgb/$id.jpg").writeBytes(it) }
         val rgbStatus = when {
             jpeg != null -> "saved"
+            k.rgbNv21 != null && !k.saveJpeg -> "used for colour only"
             k.rgbNv21 != null -> "unavailable: JPEG encoding failed"
             else -> k.rgbStatus
         }
@@ -97,7 +110,11 @@ class SurveyRecorder(
         val stats = PixelStats()
         if (synced) {
             val pts = DepthMath.framePoints(k.depth, k.confidence, k.width, k.height, k.depthIntrinsics, k.pose, stats)
-            grid.addAll(pts)
+            val sampler = k.rgbNv21?.let { nv -> k.rgbIntrinsics?.let { ki -> k.rgbPose?.let { pose -> runCatching { ColorSampler(nv, k.rgbWidth, k.rgbHeight, ki, pose) }.getOrNull() } } }
+            val cols = sampler?.let { sm -> IntArray(pts.size / 4) { i -> sm.colourAt(pts[i * 4], pts[i * 4 + 1], pts[i * 4 + 2]) } }
+            cols?.let { c -> colouredPoints += c.count { it != VoxelGrid.NO_COLOUR } }
+            grid.addAll(pts, cols)
+            updateLive(pts)
             points = grid.size
             validFrames.incrementAndGet()
         }
@@ -120,6 +137,7 @@ class SurveyRecorder(
             put("intrinsics", JSONObject().put("camera", k.cameraIntrinsics.toJson()).put("depth", k.depthIntrinsics.toJson())
                 .put("note", "depth intrinsics = camera texture intrinsics scaled to the depth image size"))
             put("rgb", JSONObject().put("status", rgbStatus).apply {
+                if (k.rgbNv21 != null) { put("usedForColour", k.rgbIntrinsics != null); k.rgbIntrinsics?.let { put("intrinsics", it.toJson()) } }
                 if (jpeg != null) { put("file", "rgb/$id.jpg"); put("width", k.rgbWidth); put("height", k.rgbHeight)
                     put("cameraTimestampNs", k.rgbTimestampNs); k.rgbPose?.let { p -> put("poseMatrixColumnMajor", JSONArray(p.map { it.toDouble() })) } }
             })
@@ -128,21 +146,40 @@ class SurveyRecorder(
         File(dir, "frames/$id.json").writeText(meta.toString(2))
     }
 
+    /** Keeps a rolling sample of recent points for the live overlay (disk thread). */
+    internal fun updateLive(pts: FloatArray) {
+        val n = pts.size / 4
+        if (n == 0) return
+        val step = maxOf(1, n / 600)
+        var i = 0
+        while (i < n) {
+            liveRing[liveAt * 3] = pts[i * 4]; liveRing[liveAt * 3 + 1] = pts[i * 4 + 1]; liveRing[liveAt * 3 + 2] = pts[i * 4 + 2]
+            liveAt = (liveAt + 1) % SurveyConfig.LIVE_POINTS
+            if (liveCount < SurveyConfig.LIVE_POINTS) liveCount++
+            i += step
+        }
+        live = liveRing.copyOf(liveCount * 3)
+    }
+
     /** Stop: wait for queued frames, then write cloud.xyzc, preview.bin and manifest.json. Blocking; call off the UI thread. */
     fun finish(appVersion: String): JSONObject {
         finished = true
         val f: Future<JSONObject> = io.submit<JSONObject> {
             val cloud = grid.points()
+            val cols = grid.colours()
+            val keep = grid.keepMask()
+            val kept = keep.count { it }
             File(dir, "cloud.xyzc").bufferedWriter().use { w ->
                 w.write("# LaserPlan AR survey processed cloud: x y z confidence\n")
-                w.write("# metres, ARCore world frame (+Y up), voxel ${SurveyConfig.VOXEL_M} m averages; confidence 0-1\n")
-                var i = 0
-                while (i < cloud.size) {
-                    w.write(String.format(Locale.US, "%.4f %.4f %.4f %.3f\n", cloud[i], cloud[i + 1], cloud[i + 2], cloud[i + 3])); i += 4
-                }
+                w.write("# metres, ARCore world frame (+Y up), voxel ${SurveyConfig.VOXEL_M} m averages; confidence 0-1; stray points removed\n")
+                for (i in keep.indices) if (keep[i])
+                    w.write(String.format(Locale.US, "%.4f %.4f %.4f %.3f\n", cloud[i * 4], cloud[i * 4 + 1], cloud[i * 4 + 2], cloud[i * 4 + 3]))
             }
-            writePreview(File(dir, "preview.bin"), grid.sample())
-            val manifest = manifest(appVersion, cloud.size / 4)
+            writePly(File(dir, "cloud.ply"), cloud, cols, keep, kept)
+            val (px, pc) = grid.sample(keep = keep)
+            writePreview5(File(dir, PREVIEW5), px, pc)
+            val manifest = manifest(appVersion, kept).put("pointsBeforeStrayFilter", cloud.size / 4)
+                .put("colouredPoints", cols.indices.count { keep[it] && cols[it] != VoxelGrid.NO_COLOUR })
             File(dir, "manifest.json").writeText(manifest.toString(2))
             manifest
         }
@@ -166,11 +203,12 @@ class SurveyRecorder(
         put("frameCount", frames.get()); put("validFrameCount", validFrames.get()); put("skippedBecauseBusy", skippedBusy.get())
         put("pointCount", pointCount); put("pointsDroppedAtCap", grid.dropped)
         put("processing", JSONObject()
-            .put("method", "Per-pixel pinhole unprojection of ARCore raw depth; reject 0 depth, confidence below minConfidence, range beyond maxRangeM, non-finite; voxel average")
+            .put("method", "Per-pixel pinhole unprojection of ARCore raw depth with the pose of the camera frame the depth belongs to; reject 0 depth, confidence below minConfidence, range beyond maxRangeM, non-finite; voxel average; stray voxels with fewer than minNeighbours occupied neighbours removed (clouds of minPointsForFilter or more)")
+            .put("colour", "Each point is projected into the RGB camera image of its keyframe (CPU image intrinsics and that image's own pose) and its colour sampled; voxel colour = average. Occlusion not checked.")
             .put("rawVsProcessed", "depth/ and confidence/ hold raw measurements; cloud.xyzc is processed and reduced"))
         put("accuracyNote", "Phone AR depth is estimate-grade (centimetres, worse at range and on plain or shiny surfaces). Not a survey-grade or LiDAR measurement. Confirm dimensions with the laser.")
         put("files", JSONObject().put("frames", "frames/NNNN.json").put("depth", "depth/NNNN.raw16le").put("confidence", "confidence/NNNN.raw8")
-            .put("rgb", "rgb/NNNN.jpg (selected keyframes)").put("cloud", "cloud.xyzc"))
+            .put("rgb", "rgb/NNNN.jpg (selected keyframes)").put("cloud", "cloud.xyzc").put("cloudColour", "cloud.ply (ASCII PLY with colour)"))
     }
 
     companion object {
@@ -178,6 +216,43 @@ class SurveyRecorder(
         const val VERSION = 1
 
         private fun iso(ms: Long) = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms))
+
+        const val PREVIEW5 = "preview5.bin"
+
+        /** Viewer data: x,y,z,c and colour (as float bits) per point. */
+        fun writePreview5(f: File, xyzc: FloatArray, rgb: IntArray) {
+            val n = xyzc.size / 4
+            val bb = ByteBuffer.allocate(n * 20).order(ByteOrder.LITTLE_ENDIAN)
+            for (i in 0 until n) { for (j in 0..3) bb.putFloat(xyzc[i * 4 + j]); bb.putInt(rgb[i]) }
+            f.writeBytes(bb.array())
+        }
+
+        /** Preview of a scan folder: v13.6+ (with colour) or older (no colour → colours null). */
+        fun readPreviewAny(dir: File): Pair<FloatArray, IntArray?> {
+            val f5 = File(dir, PREVIEW5)
+            if (f5.isFile) {
+                val bb = ByteBuffer.wrap(f5.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
+                val n = bb.remaining() / 20
+                val p = FloatArray(n * 4); val c = IntArray(n)
+                for (i in 0 until n) { for (j in 0..3) p[i * 4 + j] = bb.float; c[i] = bb.int }
+                return p to c
+            }
+            return readPreview(File(dir, "preview.bin")) to null
+        }
+
+        /** ASCII PLY with colour (grey where no photo saw the point) and confidence; opens in CloudCompare / MeshLab. */
+        fun writePly(f: File, xyzc: FloatArray, rgb: IntArray, keep: BooleanArray, kept: Int) {
+            f.bufferedWriter().use { w ->
+                w.write("ply\nformat ascii 1.0\ncomment LaserPlan AR survey, metres, ARCore world (+Y up); grey = no photo colour\n")
+                w.write("element vertex $kept\nproperty float x\nproperty float y\nproperty float z\n")
+                w.write("property uchar red\nproperty uchar green\nproperty uchar blue\nproperty float confidence\nend_header\n")
+                for (i in keep.indices) if (keep[i]) {
+                    val c = if (rgb[i] == VoxelGrid.NO_COLOUR) 0x808080 else rgb[i]
+                    w.write(String.format(Locale.US, "%.4f %.4f %.4f %d %d %d %.3f\n", xyzc[i * 4], xyzc[i * 4 + 1], xyzc[i * 4 + 2],
+                        (c shr 16) and 0xFF, (c shr 8) and 0xFF, c and 0xFF, xyzc[i * 4 + 3]))
+                }
+            }
+        }
 
         fun writePreview(f: File, xyzc: FloatArray) {
             val bb = ByteBuffer.allocate(xyzc.size * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -193,10 +268,12 @@ class SurveyRecorder(
             return out
         }
 
-        /** Streams the session as one ZIP (manifest first; preview.bin is internal and left out). */
+        /** Streams the session as one ZIP (manifest first; the viewer previews are internal and left out). */
+        private val INTERNAL_FILES = setOf("preview.bin", PREVIEW5)
+
         fun zip(dir: File, out: OutputStream) {
             ZipOutputStream(out.buffered()).use { z ->
-                val files = dir.walkTopDown().filter { it.isFile && it.name != "preview.bin" }
+                val files = dir.walkTopDown().filter { it.isFile && it.name !in INTERNAL_FILES }
                     .sortedWith(compareBy<File> { it.name != "manifest.json" }.thenBy { it.relativeTo(dir).path })
                 for (f in files) {
                     z.putNextEntry(ZipEntry(f.relativeTo(dir).invariantSeparatorsPath))

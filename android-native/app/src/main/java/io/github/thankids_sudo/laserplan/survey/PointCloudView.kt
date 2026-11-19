@@ -2,138 +2,178 @@ package io.github.thankids_sudo.laserplan.survey
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
+import android.opengl.GLES20
+import android.opengl.GLSurfaceView
+import android.opengl.Matrix
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
-import android.view.View
-import kotlin.math.cos
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Sparse point-cloud viewer: one-finger drag rotates, pinch zooms, double tap resets.
- * Perspective projection about the cloud's centre, points coloured by height, XYZ axis gizmo.
+ * OpenGL point-cloud viewer: round points in photo colour (or height colour), perspective camera orbiting the cloud's
+ * centre, depth test, XYZ axis lines. One-finger drag rotates, pinch zooms, double tap resets.
  * It shows measured points only – it is not a mesh or a model.
  */
-class PointCloudView(context: Context) : View(context) {
-    private var pts = FloatArray(0)          // x,y,z,c
-    private var cx = 0f; private var cy = 0f; private var cz = 0f
-    private var radius = 1f
-    private var minY = 0f; private var maxY = 1f
-    private var yaw = 0.6f
-    private var pitch = 0.45f
-    private var zoom = 1f
-    private var lastX = 0f; private var lastY = 0f
+class PointCloudView(context: Context) : GLSurfaceView(context) {
+    enum class ColourMode { PHOTO, HEIGHT }
+
     private val d = resources.displayMetrics.density
-
-    private val bands = 8
-    private val paints = Array(bands) { i ->
-        Paint().apply {
-            val t = i / (bands - 1f)
-            color = Color.HSVToColor(floatArrayOf(240f - 240f * t, 0.75f, 1f))
-            strokeWidth = 2.2f * d; strokeCap = Paint.Cap.ROUND; isAntiAlias = false
-        }
-    }
-    private val buffers = Array(bands) { FloatArray(0) }
-    private val counts = IntArray(bands)
-    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 14 * d }
-    private val axis = arrayOf(
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FF5252"); strokeWidth = 3 * d },
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#3DDC84"); strokeWidth = 3 * d },
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#448AFF"); strokeWidth = 3 * d },
-    )
-
+    private val renderer = CloudRenderer()
+    private var lastX = 0f; private var lastY = 0f; private var lastTap = 0L
     private val scaler = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(det: ScaleGestureDetector): Boolean {
-            zoom = (zoom * det.scaleFactor).coerceIn(0.2f, 20f); invalidate(); return true
+            renderer.zoom = (renderer.zoom * det.scaleFactor).coerceIn(0.2f, 25f); requestRender(); return true
         }
     })
-    private var lastTap = 0L
 
-    init { setBackgroundColor(Color.parseColor("#0B1220")) }
+    /** Called on the UI thread with a summary line (point count, size, colour coverage) once data is loaded. */
+    var onSummary: ((String) -> Unit)? = null
 
-    fun setPoints(xyzc: FloatArray) {
-        pts = xyzc
-        val n = pts.size / 4
-        if (n > 0) {
-            var sx = 0.0; var sy = 0.0; var sz = 0.0
-            minY = Float.MAX_VALUE; maxY = -Float.MAX_VALUE
-            for (i in 0 until n) { sx += pts[i * 4]; sy += pts[i * 4 + 1]; sz += pts[i * 4 + 2]; minY = min(minY, pts[i * 4 + 1]); maxY = max(maxY, pts[i * 4 + 1]) }
-            cx = (sx / n).toFloat(); cy = (sy / n).toFloat(); cz = (sz / n).toFloat()
-            var r = 0f
-            for (i in 0 until n) { val dx = pts[i * 4] - cx; val dy = pts[i * 4 + 1] - cy; val dz = pts[i * 4 + 2] - cz; r = max(r, sqrt(dx * dx + dy * dy + dz * dz)) }
-            radius = max(r, 0.1f)
-        }
-        for (b in 0 until bands) buffers[b] = FloatArray(n * 2)
-        resetView()
+    init {
+        setEGLContextClientVersion(2)
+        setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+        setRenderer(renderer)
+        renderMode = RENDERMODE_WHEN_DIRTY
     }
 
-    fun resetView() { yaw = 0.6f; pitch = 0.45f; zoom = 1f; invalidate() }
+    /** [xyzc] packed x,y,z,confidence; [rgb] 0xRRGGBB per point or −1 (no photo colour), or null for older scans. */
+    fun setPoints(xyzc: FloatArray, rgb: IntArray?) {
+        val n = xyzc.size / 4
+        var sx = 0.0; var sy = 0.0; var sz = 0.0; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        for (i in 0 until n) { sx += xyzc[i * 4]; sy += xyzc[i * 4 + 1]; sz += xyzc[i * 4 + 2]; minY = min(minY, xyzc[i * 4 + 1]); maxY = max(maxY, xyzc[i * 4 + 1]) }
+        val cx = if (n > 0) (sx / n).toFloat() else 0f; val cy = if (n > 0) (sy / n).toFloat() else 0f; val cz = if (n > 0) (sz / n).toFloat() else 0f
+        var r = 0.1f
+        for (i in 0 until n) { val dx = xyzc[i * 4] - cx; val dy = xyzc[i * 4 + 1] - cy; val dz = xyzc[i * 4 + 2] - cz; r = max(r, sqrt(dx * dx + dy * dy + dz * dz)) }
+        val photo = FloatArray(n * 6); val height = FloatArray(n * 6)
+        val span = max(maxY - minY, 1e-3f)
+        var coloured = 0
+        val hsv = FloatArray(3)
+        for (i in 0 until n) {
+            val x = xyzc[i * 4] - cx; val y = xyzc[i * 4 + 1] - cy; val z = xyzc[i * 4 + 2] - cz
+            hsv[0] = 240f - 240f * ((xyzc[i * 4 + 1] - minY) / span); hsv[1] = 0.75f; hsv[2] = 1f
+            val hc = Color.HSVToColor(hsv)
+            val c = rgb?.get(i)?.takeIf { it != VoxelGrid.NO_COLOUR }?.also { coloured++ } ?: 0x9A9A9A
+            for ((buf, col) in listOf(photo to c, height to hc)) {
+                buf[i * 6] = x; buf[i * 6 + 1] = y; buf[i * 6 + 2] = z
+                buf[i * 6 + 3] = ((col shr 16) and 0xFF) / 255f; buf[i * 6 + 4] = ((col shr 8) and 0xFF) / 255f; buf[i * 6 + 5] = (col and 0xFF) / 255f
+            }
+        }
+        queueEvent { renderer.load(photo, height, n, r) }
+        if (rgb == null || coloured == 0) setMode(ColourMode.HEIGHT)
+        val pct = if (n > 0) coloured * 100 / n else 0
+        post {
+            onSummary?.invoke(if (n == 0) "No 3D points in this scan yet."
+            else "$n points · ${"%.1f".format(r * 2)} m across · ${if (rgb == null) "older scan, no photo colour" else "$pct% photo-coloured"}")
+        }
+        requestRender()
+    }
+
+    fun setMode(m: ColourMode) { renderer.mode = m; requestRender() }
+    val mode get() = renderer.mode
+    fun pointSize(delta: Float) { renderer.pointSize = (renderer.pointSize + delta).coerceIn(1f, 14f); requestRender() }
+    fun resetView() { renderer.yaw = 0.6f; renderer.pitch = 0.45f; renderer.zoom = 1f; requestRender() }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         scaler.onTouchEvent(e)
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                lastX = e.x; lastY = e.y
-                if (e.eventTime - lastTap < 300) resetView()
-                lastTap = e.eventTime
-            }
+            MotionEvent.ACTION_DOWN -> { lastX = e.x; lastY = e.y; if (e.eventTime - lastTap < 300) resetView(); lastTap = e.eventTime }
             MotionEvent.ACTION_MOVE -> if (e.pointerCount == 1 && !scaler.isInProgress) {
-                yaw += (e.x - lastX) / (150 * d)
-                pitch = (pitch + (e.y - lastY) / (150 * d)).coerceIn(-1.5f, 1.5f)
-                lastX = e.x; lastY = e.y; invalidate()
+                renderer.yaw += (e.x - lastX) / (150 * d)
+                renderer.pitch = (renderer.pitch + (e.y - lastY) / (150 * d)).coerceIn(-1.5f, 1.5f)
+                lastX = e.x; lastY = e.y; requestRender()
             }
             MotionEvent.ACTION_POINTER_UP -> { lastX = e.x; lastY = e.y }
         }
         return true
     }
 
-    override fun onDraw(c: Canvas) {
-        val n = pts.size / 4
-        if (n == 0) {
-            text.textAlign = Paint.Align.CENTER
-            c.drawText("No 3D points yet.", width / 2f, height / 2f - 10 * d, text)
-            c.drawText("Record a survey with depth, then stop it.", width / 2f, height / 2f + 14 * d, text)
-            return
-        }
-        val cyw = cos(yaw); val syw = sin(yaw); val cp = cos(pitch); val sp = sin(pitch)
-        val f = min(width, height) * 0.9f * zoom
-        val camDist = radius * 2.6f
-        val w2 = width / 2f; val h2 = height / 2f
-        counts.fill(0)
-        val span = max(maxY - minY, 1e-3f)
-        for (i in 0 until n) {
-            val x = pts[i * 4] - cx; val y = pts[i * 4 + 1] - cy; val z = pts[i * 4 + 2] - cz
-            val x1 = cyw * x + syw * z; val z1 = -syw * x + cyw * z          // yaw about Y
-            val y2 = cp * y - sp * z1; val z2 = sp * y + cp * z1              // pitch about X
-            val depth = camDist - z2
-            if (depth <= 0.05f) continue
-            val sx = w2 + f * x1 / depth / radius * 0.5f
-            val sy = h2 - f * y2 / depth / radius * 0.5f
-            val b = (((pts[i * 4 + 1] - minY) / span) * (bands - 1)).toInt().coerceIn(0, bands - 1)
-            val buf = buffers[b]; val k = counts[b]
-            buf[k] = sx; buf[k + 1] = sy; counts[b] = k + 2
-        }
-        for (b in 0 until bands) if (counts[b] > 0) c.drawPoints(buffers[b], 0, counts[b], paints[b])
+    private inner class CloudRenderer : Renderer {
+        @Volatile var yaw = 0.6f
+        @Volatile var pitch = 0.45f
+        @Volatile var zoom = 1f
+        @Volatile var mode = ColourMode.PHOTO
+        @Volatile var pointSize = 5f * d / 2.6f
+        private var photo: FloatBuffer? = null
+        private var height: FloatBuffer? = null
+        private var count = 0
+        private var radius = 1f
+        private var prog = 0; private var aPos = 0; private var aCol = 0; private var uMvp = 0; private var uSize = 0; private var uRound = 0
+        private val axes = buf(floatArrayOf(
+            0f, 0f, 0f, 1f, 0.32f, 0.32f, 1f, 0f, 0f, 1f, 0.32f, 0.32f,
+            0f, 0f, 0f, 0.24f, 0.86f, 0.52f, 0f, 1f, 0f, 0.24f, 0.86f, 0.52f,
+            0f, 0f, 0f, 0.27f, 0.54f, 1f, 0f, 0f, 1f, 0.27f, 0.54f, 1f,
+        ))
+        private val proj = FloatArray(16); private val view = FloatArray(16); private val mvp = FloatArray(16); private val model = FloatArray(16)
+        private var aspect = 1f
 
-        // Axis gizmo (world X red, Y up green, Z blue), bottom-left.
-        val ox = 56 * d; val oy = height - 56 * d; val L = 36 * d
-        val axes = arrayOf(floatArrayOf(1f, 0f, 0f), floatArrayOf(0f, 1f, 0f), floatArrayOf(0f, 0f, 1f))
-        val names = arrayOf("X", "Y", "Z")
-        text.textAlign = Paint.Align.CENTER
-        for (a in 0..2) {
-            val (x, y, z) = Triple(axes[a][0], axes[a][1], axes[a][2])
-            val x1 = cyw * x + syw * z; val z1 = -syw * x + cyw * z
-            val y2 = cp * y - sp * z1
-            c.drawLine(ox, oy, ox + x1 * L, oy - y2 * L, axis[a])
-            c.drawText(names[a], ox + x1 * (L + 10 * d), oy - y2 * (L + 10 * d) + 5 * d, text)
+        fun load(p: FloatArray, h: FloatArray, n: Int, r: Float) { photo = buf(p); height = buf(h); count = n; radius = r }
+
+        override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+            GLES20.glClearColor(0.043f, 0.071f, 0.125f, 1f)
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+            prog = GLES20.glCreateProgram().also {
+                GLES20.glAttachShader(it, shader(GLES20.GL_VERTEX_SHADER, VS)); GLES20.glAttachShader(it, shader(GLES20.GL_FRAGMENT_SHADER, FS))
+                GLES20.glLinkProgram(it)
+            }
+            aPos = GLES20.glGetAttribLocation(prog, "aPos"); aCol = GLES20.glGetAttribLocation(prog, "aCol")
+            uMvp = GLES20.glGetUniformLocation(prog, "uMvp"); uSize = GLES20.glGetUniformLocation(prog, "uSize"); uRound = GLES20.glGetUniformLocation(prog, "uRound")
         }
-        text.textAlign = Paint.Align.LEFT
-        c.drawText("$n points · ${"%.1f".format(radius * 2)} m across · drag to rotate, pinch to zoom, double-tap to reset", 12 * d, 22 * d, text)
+
+        override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) { GLES20.glViewport(0, 0, w, h); aspect = w.toFloat() / max(h, 1) }
+
+        override fun onDrawFrame(gl: GL10?) {
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+            val dist = radius * 2.8f / zoom
+            Matrix.perspectiveM(proj, 0, 50f, aspect, max(0.01f, dist - radius * 3), dist + radius * 3)
+            Matrix.setLookAtM(view, 0, 0f, 0f, dist, 0f, 0f, 0f, 0f, 1f, 0f)
+            Matrix.setIdentityM(model, 0)
+            Matrix.rotateM(model, 0, Math.toDegrees(pitch.toDouble()).toFloat(), 1f, 0f, 0f)
+            Matrix.rotateM(model, 0, Math.toDegrees(yaw.toDouble()).toFloat(), 0f, 1f, 0f)
+            Matrix.multiplyMM(mvp, 0, view, 0, model, 0)
+            Matrix.multiplyMM(mvp, 0, proj, 0, mvp, 0)
+            GLES20.glUseProgram(prog)
+            GLES20.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
+            val b = (if (mode == ColourMode.PHOTO) photo else height)
+            if (b != null && count > 0) {
+                GLES20.glUniform1f(uSize, pointSize * dist); GLES20.glUniform1f(uRound, 1f)
+                draw(b, GLES20.GL_POINTS, count)
+            }
+            // Axis lines through the cloud centre, a fifth of the cloud's size: X red, Y (up) green, Z blue.
+            val s = radius * 0.4f
+            val a = FloatArray(36); axes.position(0); axes.get(a); axes.position(0)
+            for (i in 0 until 6) { a[i * 6] *= s; a[i * 6 + 1] *= s; a[i * 6 + 2] *= s }
+            GLES20.glUniform1f(uSize, 1f); GLES20.glUniform1f(uRound, 0f)
+            GLES20.glLineWidth(3f)
+            draw(buf(a), GLES20.GL_LINES, 6)
+        }
+
+        private fun draw(b: FloatBuffer, primitive: Int, n: Int) {
+            b.position(0); GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 24, b)
+            b.position(3); GLES20.glVertexAttribPointer(aCol, 3, GLES20.GL_FLOAT, false, 24, b)
+            GLES20.glEnableVertexAttribArray(aPos); GLES20.glEnableVertexAttribArray(aCol)
+            GLES20.glDrawArrays(primitive, 0, n)
+            GLES20.glDisableVertexAttribArray(aPos); GLES20.glDisableVertexAttribArray(aCol)
+            b.position(0)
+        }
+
+        private fun shader(type: Int, src: String) = GLES20.glCreateShader(type).also { GLES20.glShaderSource(it, src); GLES20.glCompileShader(it) }
+    }
+
+    private companion object {
+        fun buf(a: FloatArray): FloatBuffer = ByteBuffer.allocateDirect(a.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(a); position(0) }
+        // Point size shrinks with distance; points are drawn as soft-edged discs.
+        const val VS = "uniform mat4 uMvp; uniform float uSize; attribute vec3 aPos; attribute vec3 aCol; varying vec3 vCol;\n" +
+            "void main(){ gl_Position = uMvp * vec4(aPos, 1.0); vCol = aCol; gl_PointSize = clamp(uSize / max(gl_Position.w, 0.05), 1.0, 24.0); }"
+        const val FS = "precision mediump float; varying vec3 vCol; uniform float uRound;\n" +
+            "void main(){ if (uRound > 0.5) { vec2 p = gl_PointCoord - vec2(0.5); float r = dot(p, p); if (r > 0.25) discard; gl_FragColor = vec4(vCol * (1.0 - r * 1.2), 1.0); } else { gl_FragColor = vec4(vCol, 1.0); } }"
     }
 }
