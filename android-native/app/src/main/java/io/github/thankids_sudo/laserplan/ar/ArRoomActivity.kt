@@ -285,7 +285,12 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
             val p = hit.first.hitPose; val l = poses.last()
             hypot((p.tx() - l.tx()).toDouble(), (p.tz() - l.tz()).toDouble())
         } else if (heightMode && hit != null && floorY != null) (hit.first.hitPose.ty() - floorY!!).toDouble() else null
-        arOverlay.state = OverlayState(poses.map { project(it.tx(), it.ty(), it.tz()) }, lengths, hit != null, live, heightMode)
+        val dots = recorder?.live?.let { w ->
+            val out = FloatArray(w.size / 3 * 2); var n = 0
+            for (i in 0 until w.size / 3) project(w[i * 3], w[i * 3 + 1], w[i * 3 + 2])?.let { p -> out[n++] = p[0]; out[n++] = p[1] }
+            out.copyOf(n)
+        }
+        arOverlay.state = OverlayState(poses.map { project(it.tx(), it.ty(), it.tz()) }, lengths, hit != null, live, heightMode, dots)
     }
 
     private fun project(x: Float, y: Float, z: Float): FloatArray? {
@@ -513,7 +518,9 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         val r = recorder ?: return
         val pol = policy ?: return
         val now = SystemClock.elapsedRealtime()
-        if (!pol.shouldCapture(now)) return
+        val camNow = frame.camera.pose
+        val tNow = camNow.translation; val qNow = camNow.rotationQuaternion
+        if (!pol.shouldCapture(now, tNow, qNow)) return
         val depthImg = try { frame.acquireRawDepthImage16Bits() } catch (_: NotYetAvailableException) { return } catch (_: Exception) { return }
         // Depth usually belongs to an earlier camera frame: use that frame's pose; skip if it is a repeat or too old.
         val rec = if (depthImg.timestamp == lastDepthTs) null else poseHistory.find(depthImg.timestamp)
@@ -530,18 +537,20 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                 val ti = cam.textureIntrinsics
                 val camK = Intrinsics(ti.focalLength[0].toDouble(), ti.focalLength[1].toDouble(), ti.principalPoint[0].toDouble(), ti.principalPoint[1].toDouble(), ti.imageDimensions[0], ti.imageDimensions[1])
                 val rgbPose = FloatArray(16).also { cam.pose.toMatrix(it, 0) }
+                // Every keyframe's camera image is used to colour its points; every Nth is also saved as JPEG.
                 var nv21: ByteArray? = null; var rgbW = 0; var rgbH = 0
-                var rgbStatus = "not-requested"
-                if (pol.taken % SurveyConfig.RGB_EVERY_N_KEYFRAMES == 0) {
-                    rgbStatus = try {
-                        frame.acquireCameraImage().use { img -> nv21 = yuvToNv21(img); rgbW = img.width; rgbH = img.height }
-                        "captured"
-                    } catch (_: NotYetAvailableException) { "unavailable: camera image not ready" } catch (e: Exception) { "unavailable: ${e.javaClass.simpleName}" }
-                }
+                val ii = cam.imageIntrinsics
+                val rgbK = Intrinsics(ii.focalLength[0].toDouble(), ii.focalLength[1].toDouble(), ii.principalPoint[0].toDouble(), ii.principalPoint[1].toDouble(), ii.imageDimensions[0], ii.imageDimensions[1])
+                val rgbStatus = try {
+                    frame.acquireCameraImage().use { img -> nv21 = yuvToNv21(img); rgbW = img.width; rgbH = img.height }
+                    "captured"
+                } catch (_: NotYetAvailableException) { "unavailable: camera image not ready" } catch (e: Exception) { "unavailable: ${e.javaClass.simpleName}" }
                 val ok = r.submit(Keyframe(depth, confTight, w, h, camK.scaledTo(w, h), camK, rec.matrix, rec.translation, rec.quaternion,
                     depthImg.timestamp, rec.timestampNs, nv21, rgbStatus, rgbW, rgbH,
-                    rgbTimestampNs = if (nv21 != null) frame.timestamp else 0L, rgbPose = if (nv21 != null) rgbPose else null))
-                if (ok) pol.captured(now)
+                    rgbTimestampNs = if (nv21 != null) frame.timestamp else 0L, rgbPose = if (nv21 != null) rgbPose else null,
+                    rgbIntrinsics = if (nv21 != null && rgbK.width == rgbW && rgbK.height == rgbH) rgbK else null,
+                    saveJpeg = pol.taken % SurveyConfig.RGB_EVERY_N_KEYFRAMES == 0))
+                if (ok) pol.captured(now, tNow, qNow)
             } finally { conf?.close() }
         } finally { depthImg.close() }
     }

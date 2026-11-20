@@ -15,6 +15,7 @@ data class OverlayState(
     val reticleValid: Boolean = false,
     val liveLength: Double? = null,                   // last corner → reticle, metres
     val heightMode: Boolean = false,
+    val liveDots: FloatArray? = null,                 // screen x,y pairs of recently scanned points (recording only)
 )
 
 /** Draws the reticle, numbered corners and the outline over the camera image. UI thread. */
@@ -28,9 +29,11 @@ class ArOverlayView(context: Context) : View(context) {
     private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#3DDC84"); style = Paint.Style.FILL }
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 15 * d; isFakeBoldText = true; setShadowLayer(4 * d, 0f, 0f, Color.BLACK); textAlign = Paint.Align.CENTER }
     private val ret = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 3 * d; style = Paint.Style.STROKE }
+    private val liveDot = Paint().apply { color = Color.parseColor("#B33DDC84"); strokeWidth = 3 * d; strokeCap = Paint.Cap.ROUND }
 
     override fun onDraw(c: Canvas) {
         val s = state
+        s.liveDots?.let { if (it.isNotEmpty()) c.drawPoints(it, liveDot) }
         val pts = s.corners
         for (i in pts.indices) {
             val a = pts[i] ?: continue

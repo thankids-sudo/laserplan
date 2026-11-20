@@ -101,9 +101,10 @@ class VoxelGridTest {
     @Test fun previewIsCappedAndDeterministic() {
         val g = VoxelGrid(voxel = 0.01)
         for (i in 0 until 1000) g.add(i * 0.05f, 0f, 0f, 1f)
-        assertEquals(100 * 4, g.sample(100).size)
-        assertArrayEquals(g.sample(100), g.sample(100), 0f)
-        assertEquals(1000 * 4, g.sample(5000).size)
+        assertEquals(100 * 4, g.sample(100).first.size)
+        assertEquals(100, g.sample(100).second.size)
+        assertArrayEquals(g.sample(100).first, g.sample(100).first, 0f)
+        assertEquals(1000 * 4, g.sample(5000).first.size)
     }
 }
 
@@ -132,7 +133,7 @@ class PoseHistoryTest {
 
 class KeyframePolicyTest {
     @Test fun oneSecondApartAndMax90() {
-        val p = KeyframePolicy(intervalMs = 1000, max = 90)
+        val p = KeyframePolicy(maxIntervalMs = 1000, max = 90)
         assertTrue(p.shouldCapture(10_000)); p.captured(10_000)
         assertFalse(p.shouldCapture(10_500))
         assertTrue(p.shouldCapture(11_000))
@@ -183,6 +184,7 @@ class SurveyPackageTest {
         assertTrue(names.containsAll(listOf("frames/0001.json", "frames/0002.json", "depth/0001.raw16le", "depth/0002.raw16le",
             "confidence/0001.raw8", "cloud.xyzc")))
         assertFalse(names.contains("preview.bin"))
+        assertFalse(names.contains("preview5.bin")); assertTrue(names.contains("cloud.ply"))
         assertEquals(2, JSONObject(manifestText).getInt("frameCount"))
 
         val f2 = JSONObject(File(dir, "frames/0002.json").readText())
@@ -194,7 +196,11 @@ class SurveyPackageTest {
         assertEquals(8, File(dir, "depth/0001.raw16le").length())
         val cloudLines = File(dir, "cloud.xyzc").readLines().filter { !it.startsWith("#") }
         assertEquals(2, cloudLines.size)
-        assertEquals(2 * 4, SurveyRecorder.readPreview(File(dir, "preview.bin")).size)
+        val (prev, prevCol) = SurveyRecorder.readPreviewAny(dir)
+        assertEquals(2 * 4, prev.size); assertEquals(2, prevCol!!.size)
+        val ply = File(dir, "cloud.ply").readLines()
+        assertTrue(ply.contains("element vertex 2")); assertEquals(2, ply.size - ply.indexOf("end_header") - 1)
+        assertEquals(2, m.getInt("pointsBeforeStrayFilter"))   // tiny cloud: stray filter not applied
         dir.deleteRecursively()
     }
 
@@ -209,5 +215,69 @@ class SurveyPackageTest {
     @Test fun missingPreviewIsEmpty() {
         assertEquals(0, SurveyRecorder.readPreview(File("does-not-exist.bin")).size)
         assertNull(null)
+    }
+}
+
+
+class PhaseBTest {
+    private val k = Intrinsics(fx = 100.0, fy = 100.0, cx = 50.0, cy = 40.0, width = 100, height = 80)
+
+    private fun nv21(w: Int, h: Int, y: Int, u: Int, v: Int) = ByteArray(w * h * 3 / 2).also { b ->
+        for (i in 0 until w * h) b[i] = y.toByte()
+        var o = w * h; while (o < b.size) { b[o] = v.toByte(); b[o + 1] = u.toByte(); o += 2 }
+    }
+
+    @Test fun nv21ColourConversion() {
+        assertEquals(0x808080, ColorSampler.nv21Rgb(nv21(4, 4, 128, 128, 128), 4, 4, 1, 1))
+        val red = ColorSampler.nv21Rgb(nv21(4, 4, 76, 85, 255), 4, 4, 2, 2)   // BT.601 red ≈ (255, 0, 0)
+        assertTrue((red shr 16) and 0xFF > 240); assertTrue((red shr 8) and 0xFF < 15); assertTrue(red and 0xFF < 15)
+    }
+
+    @Test fun pointsProjectIntoTheRightPixel() {
+        val img = nv21(100, 80, 200, 128, 128)
+        img[40 * 100 + 60] = 10   // a dark pixel at (u=60, v=40)
+        val s = ColorSampler(img, 100, 80, k, IDENTITY)
+        // camera at origin looking down −Z: (0.2, 0, −2) projects to u = 100·0.2/2 + 50 = 60, v = 40
+        assertEquals(0x0A0A0A, s.colourAt(0.2f, 0f, -2f))
+        assertEquals(0xC8C8C8, s.colourAt(0f, 0f, -2f))
+        assertEquals(VoxelGrid.NO_COLOUR, s.colourAt(0f, 0f, 2f))       // behind the camera
+        assertEquals(VoxelGrid.NO_COLOUR, s.colourAt(5f, 0f, -1f))       // outside the image
+    }
+
+    @Test fun samplerUsesItsOwnPose() {
+        // Camera moved to x = 1: the same world point now projects 50 px further left.
+        val moved = IDENTITY.copyOf().also { it[12] = 1f }
+        val img = nv21(100, 80, 200, 128, 128); img[40 * 100 + 10] = 10
+        assertEquals(0x0A0A0A, ColorSampler(img, 100, 80, k, moved).colourAt(0.21f, 0f, -2f))   // u = 100·(−0.79)/2 + 50 = 10.5 → pixel 10 (off the pixel edge)
+    }
+
+    @Test fun voxelColoursAverageAndUncolouredStayUnknown() {
+        val g = VoxelGrid(voxel = 0.02)
+        g.add(0.001f, 0f, 0f, 1f, 0x000000); g.add(0.002f, 0f, 0f, 1f, 0xFEFEFE); g.add(0.5f, 0f, 0f, 1f)
+        assertEquals(0x7F7F7F, g.colours()[0])
+        assertEquals(VoxelGrid.NO_COLOUR, g.colours()[1])
+    }
+
+    @Test fun strayPointsAreRemovedFromDenseClouds() {
+        val g = VoxelGrid(voxel = 0.02)
+        for (x in 0 until 10) for (y in 0 until 10) for (z in 0 until 10) g.add(x * 0.02f + 0.01f, y * 0.02f + 0.01f, z * 0.02f + 0.01f, 1f)   // 1000-voxel cube
+        g.add(3f, 3f, 3f, 1f)   // lone stray point
+        val keep = g.keepMask()
+        assertEquals(1001, keep.size)
+        assertFalse(keep[1000])
+        assertEquals(1000, keep.count { it })
+    }
+
+    @Test fun keyframesFollowMovementNotTheClock() {
+        val p = KeyframePolicy(minIntervalMs = 250, maxIntervalMs = 1500)
+        val t0 = floatArrayOf(0f, 0f, 0f); val q0 = floatArrayOf(0f, 0f, 0f, 1f)
+        assertTrue(p.shouldCapture(10_000, t0, q0)); p.captured(10_000, t0, q0)
+        assertFalse(p.shouldCapture(10_200, floatArrayOf(0.5f, 0f, 0f), q0))                  // moved, but < 250 ms
+        assertTrue(p.shouldCapture(10_300, floatArrayOf(0.12f, 0f, 0f), q0))                  // moved 12 cm
+        assertFalse(p.shouldCapture(10_300, floatArrayOf(0.05f, 0f, 0f), q0))                 // 5 cm: not yet
+        val turn15 = floatArrayOf(0f, Math.sin(Math.toRadians(7.5)).toFloat(), 0f, Math.cos(Math.toRadians(7.5)).toFloat())
+        assertTrue(p.shouldCapture(10_300, t0, turn15))                                       // turned 15°
+        assertEquals(15.0, KeyframePolicy.turnDeg(turn15, q0), 1e-3)
+        assertTrue(p.shouldCapture(11_500, t0, q0))                                           // standing still: every 1.5 s
     }
 }
