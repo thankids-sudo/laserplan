@@ -23,6 +23,7 @@ class SurveyViewerActivity : AppCompatActivity() {
     private lateinit var view: PointCloudView
     private lateinit var info: TextView
     private lateinit var modeBtn: Button
+    private lateinit var wallsBtn: Button
 
     private val save = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -44,17 +45,24 @@ class SurveyViewerActivity : AppCompatActivity() {
             setTextColor(Color.WHITE); textSize = 13f; setPadding(24, 16, 24, 16); setBackgroundColor(Color.parseColor("#990B1220"))
             text = "Loading…"
         }
-        view.onSummary = { info.text = "$it\nDrag to rotate · pinch to zoom · double-tap to reset" }
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; setBackgroundColor(Color.parseColor("#CC0B1220"))
-            fun add(t: String, fn: (Button) -> Unit) = Button(this@SurveyViewerActivity).apply { text = t; isAllCaps = false; textSize = 12f; setOnClickListener { fn(this) } }
-                .also { addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)) }
+        view.onSummary = { info.text = "$it\nDrag to rotate · pinch to zoom · double-tap to reset · Walls only + Top view ≈ plan" }
+        fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(Color.parseColor("#CC0B1220")) }
+        fun LinearLayout.add(t: String, fn: (Button) -> Unit) = Button(this@SurveyViewerActivity).apply { text = t; isAllCaps = false; textSize = 12f; setOnClickListener { fn(this) } }
+            .also { addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)) }
+        val bar1 = row().apply {
+            wallsBtn = add("Walls only") { b ->
+                if (!view.hasWallBand) { Toast.makeText(this@SurveyViewerActivity, "Floor and ceiling could not be told apart in this scan.", Toast.LENGTH_SHORT).show(); return@add }
+                view.wallsOnly = !view.wallsOnly; b.text = if (view.wallsOnly) "Show all" else "Walls only"
+            }
+            add("Top view") { view.topView() }
+            add("Points −") { view.pointSize(-1f) }
+            add("Points +") { view.pointSize(1f) }
+        }
+        val bar = row().apply {
             modeBtn = add("Height colour") { b ->
                 if (view.mode == PointCloudView.ColourMode.PHOTO) { view.setMode(PointCloudView.ColourMode.HEIGHT); b.text = "Photo colour" }
                 else { view.setMode(PointCloudView.ColourMode.PHOTO); b.text = "Height colour" }
             }
-            add("Points −") { view.pointSize(-1f) }
-            add("Points +") { view.pointSize(1f) }
             add("Reset") { view.resetView() }
             add("Export ZIP") { exportZip() }
             add("Close") { finish() }
@@ -65,10 +73,23 @@ class SurveyViewerActivity : AppCompatActivity() {
                 addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                 addView(info, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(bar1)
             addView(bar)
         })
         lifecycleScope.launch {
             val (p, c) = withContext(Dispatchers.IO) { SurveyRecorder.readPreviewAny(dir) }
+            val drift = withContext(Dispatchers.IO) {
+                runCatching { org.json.JSONObject(File(dir, "manifest.json").readText()).optJSONObject("poseRefinement") }.getOrNull()
+            }
+            view.onSummary = { sum ->
+                val d = when {
+                    drift == null -> ""
+                    drift.optInt("framesCorrected") > 0 -> String.format(java.util.Locale.US, " · drift corrected on %d/%d keyframes (median %.0f mm)",
+                        drift.optInt("framesCorrected"), drift.optInt("framesTotal"), drift.optDouble("medianCorrectionMm"))
+                    else -> " · no drift correction"
+                }
+                info.text = "$sum$d\nDrag to rotate · pinch to zoom · double-tap to reset · Walls only + Top view ≈ plan"
+            }
             view.setPoints(p, c)
             if (view.mode == PointCloudView.ColourMode.HEIGHT) modeBtn.text = "Photo colour"
         }

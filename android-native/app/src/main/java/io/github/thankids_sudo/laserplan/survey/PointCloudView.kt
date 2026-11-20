@@ -66,7 +66,13 @@ class PointCloudView(context: Context) : GLSurfaceView(context) {
                 buf[i * 6 + 3] = ((col shr 16) and 0xFF) / 255f; buf[i * 6 + 4] = ((col shr 8) and 0xFF) / 255f; buf[i * 6 + 5] = (col and 0xFF) / 255f
             }
         }
-        queueEvent { renderer.load(photo, height, n, r) }
+        // Walls-only subset: drop the floor and ceiling layers (2nd–98th height percentile minus a margin).
+        val band = WallBand.of(FloatArray(n) { xyzc[it * 4 + 1] })
+        val sel = if (band == null) IntArray(0) else (0 until n).filter { val y = xyzc[it * 4 + 1]; y >= band.first && y <= band.second }.toIntArray()
+        val photoW = FloatArray(sel.size * 6); val heightW = FloatArray(sel.size * 6)
+        sel.forEachIndexed { j, i -> System.arraycopy(photo, i * 6, photoW, j * 6, 6); System.arraycopy(height, i * 6, heightW, j * 6, 6) }
+        hasWallBand = sel.isNotEmpty()
+        queueEvent { renderer.load(photo, height, n, r); renderer.loadWalls(photoW, heightW, sel.size) }
         if (rgb == null || coloured == 0) setMode(ColourMode.HEIGHT)
         val pct = if (n > 0) coloured * 100 / n else 0
         post {
@@ -77,6 +83,14 @@ class PointCloudView(context: Context) : GLSurfaceView(context) {
     }
 
     fun setMode(m: ColourMode) { renderer.mode = m; requestRender() }
+    /** True when the cloud has a recognisable floor-to-ceiling range, so "walls only" can be shown. */
+    @Volatile var hasWallBand = false
+        private set
+    var wallsOnly: Boolean
+        get() = renderer.wallsOnly
+        set(v) { renderer.wallsOnly = v && hasWallBand; requestRender() }
+    /** Looks straight down (plan view); with walls only this reads like a floor plan of the scan. */
+    fun topView() { renderer.yaw = 0f; renderer.pitch = 1.5f; requestRender() }
     val mode get() = renderer.mode
     fun pointSize(delta: Float) { renderer.pointSize = (renderer.pointSize + delta).coerceIn(1f, 14f); requestRender() }
     fun resetView() { renderer.yaw = 0.6f; renderer.pitch = 0.45f; renderer.zoom = 1f; requestRender() }
@@ -101,6 +115,11 @@ class PointCloudView(context: Context) : GLSurfaceView(context) {
         @Volatile var pitch = 0.45f
         @Volatile var zoom = 1f
         @Volatile var mode = ColourMode.PHOTO
+        @Volatile var wallsOnly = false
+        private var photoW: FloatBuffer? = null
+        private var heightW: FloatBuffer? = null
+        private var countW = 0
+        fun loadWalls(p: FloatArray, h: FloatArray, n: Int) { photoW = buf(p); heightW = buf(h); countW = n }
         @Volatile var pointSize = 5f * d / 2.6f
         private var photo: FloatBuffer? = null
         private var height: FloatBuffer? = null
@@ -142,10 +161,12 @@ class PointCloudView(context: Context) : GLSurfaceView(context) {
             Matrix.multiplyMM(mvp, 0, proj, 0, mvp, 0)
             GLES20.glUseProgram(prog)
             GLES20.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
-            val b = (if (mode == ColourMode.PHOTO) photo else height)
-            if (b != null && count > 0) {
+            val walls = wallsOnly && countW > 0
+            val b = if (walls) (if (mode == ColourMode.PHOTO) photoW else heightW) else (if (mode == ColourMode.PHOTO) photo else height)
+            val nDraw = if (walls) countW else count
+            if (b != null && nDraw > 0) {
                 GLES20.glUniform1f(uSize, pointSize * dist); GLES20.glUniform1f(uRound, 1f)
-                draw(b, GLES20.GL_POINTS, count)
+                draw(b, GLES20.GL_POINTS, nDraw)
             }
             // Axis lines through the cloud centre, a fifth of the cloud's size: X red, Y (up) green, Z blue.
             val s = radius * 0.4f
