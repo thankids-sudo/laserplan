@@ -14,7 +14,10 @@ object SurveyConfig {
     const val MAX_INTERVAL_MS = 1500L
     const val MIN_MOVE_M = 0.10
     const val MIN_TURN_DEG = 10.0
-    const val MAX_KEYFRAMES = 300                 // per session (~20 MB with 160×90 depth)
+    const val MAX_KEYFRAMES = 400                 // per session (~55 MB with photo JPEGs; 300 ran out after 165 s in the 20 Nov scan)
+    const val ANCHOR_EVERY_N_KEYFRAMES = 4        // drift-correction anchors (v13.7)
+    const val MAX_ANCHOR_CORRECTION_M = 0.5       // larger anchor moves are treated as relocalisation errors, not used
+    const val MAX_ANCHOR_CORRECTION_DEG = 10.0
     const val RGB_EVERY_N_KEYFRAMES = 3           // JPEG saved on keyframes 1, 4, 7 …; every keyframe is used for colour
     const val JPEG_QUALITY = 85
     const val MIN_CONFIDENCE = 200                // raw-depth confidence byte, 0–255 (≈ 0.78; chosen from the first S24 Ultra scans)
@@ -37,7 +40,7 @@ object SurveyConfig {
         .put("maxRangeM", MAX_RANGE_M).put("voxelM", VOXEL_M).put("maxVoxels", MAX_VOXELS)
         .put("minNeighbours", MIN_NEIGHBOURS).put("minPointsForFilter", MIN_POINTS_FOR_FILTER)
         .put("maxPreviewPoints", MAX_PREVIEW_POINTS).put("maxDepthPoseDeltaNs", MAX_DEPTH_POSE_DELTA_NS)
-        .put("resumeSettleMs", RESUME_SETTLE_MS)
+        .put("resumeSettleMs", RESUME_SETTLE_MS).put("anchorEveryNKeyframes", ANCHOR_EVERY_N_KEYFRAMES)
 }
 
 /** Pinhole intrinsics in pixels for an image of width × height. */

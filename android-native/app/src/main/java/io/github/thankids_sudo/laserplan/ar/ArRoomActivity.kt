@@ -38,6 +38,7 @@ import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
 import com.google.ar.core.Plane
 import com.google.ar.core.Point
+import com.google.ar.core.Pose
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingFailureReason
 import com.google.ar.core.TrackingState
@@ -54,6 +55,8 @@ import io.github.thankids_sudo.laserplan.survey.DepthMath
 import io.github.thankids_sudo.laserplan.survey.Intrinsics
 import io.github.thankids_sudo.laserplan.survey.KeyframePolicy
 import io.github.thankids_sudo.laserplan.survey.PoseHistory
+import io.github.thankids_sudo.laserplan.survey.PoseRefinement
+import io.github.thankids_sudo.laserplan.survey.Rigid
 import io.github.thankids_sudo.laserplan.survey.ScanEvents
 import io.github.thankids_sudo.laserplan.survey.ScanStore
 import io.github.thankids_sudo.laserplan.survey.Keyframe
@@ -99,6 +102,10 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     private var lastScanId: String? = null
     private val sessionScans = mutableListOf<String>()
     private val poseHistory = PoseHistory()
+    /** Drift-correction anchors of the current recording: keyframe number, anchor, pose when placed. GL thread only. */
+    private val surveyAnchors = mutableListOf<Triple<Int, Anchor, Rigid>>()
+    /** A stop waiting for the GL thread to read the anchors; taken by exactly one of the GL action or onDestroy. */
+    private val pendingStop = java.util.concurrent.atomic.AtomicReference<Pair<SurveyRecorder, (() -> Unit)?>?>(null)
     private var lastDepthTs = 0L
     private val projectId by lazy { intent.getStringExtra(EXTRA_PROJECT)?.takeIf { ScanStore.isSafeId(it) } }
     private val roomId by lazy { intent.getStringExtra(EXTRA_ROOM_ID)?.takeIf { ScanStore.isSafeId(it) } ?: "none" }
@@ -219,7 +226,8 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     override fun onDestroy() {
-        if (recorder != null) stopSurvey(null) // keep what was recorded
+        if (recorder != null) stopSurvey(null, refine = false) // keep what was recorded; the GL thread is stopping
+        pendingStop.getAndSet(null)?.let { finishSurvey(it.first, null, null) }
         session?.close()
         session = null
         super.onDestroy()
@@ -398,7 +406,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     private fun finishRoom() {
-        if (recorder != null) { toast("Saving the 3D scan first…"); stopSurvey { finishRoom() }; return }
+        if (recorder != null) { toast("Saving the 3D scan first…"); stopSurvey({ finishRoom() }); return }
         finishRoomNow()
     }
 
@@ -450,6 +458,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         ScanStore.writeOwner(dir, pid, roomId, roomName)
         lastScanId = scanId; sessionScans += scanId
         poseHistory.clear(); lastDepthTs = 0L
+        actions.add { _ -> surveyAnchors.forEach { it.second.detach() }; surveyAnchors.clear() }
         val device = JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
             .put("android", Build.VERSION.RELEASE).put("sdk", Build.VERSION.SDK_INT)
             .put("arcoreApk", runCatching { packageManager.getPackageInfo("com.google.ar.core", 0).versionName }.getOrNull() ?: "unknown")
@@ -460,20 +469,41 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
         policy = KeyframePolicy()
         lastSurveyDir = dir
         val used = ScanStore.sizeBytes(ScanStore.projectDir(this, pid)) / 1_048_576
-        toast("Recording 3D for ${roomName.ifEmpty { "this room" }} (project scans so far: $used MB). Walk slowly round the room.")
+        toast("Recording 3D for ${roomName.ifEmpty { "this room" }} (project scans so far: $used MB). First pan slowly across the room for a few seconds, then walk slowly round it.")
     }
 
-    /** Stops recording and finalises on a background thread; [then] runs on the UI thread afterwards. */
-    private fun stopSurvey(then: (() -> Unit)?) {
+    /**
+     * Stops recording and finalises on a background thread; [then] runs on the UI thread afterwards.
+     * With [refine], the drift-correction anchors are read on the GL thread first (ARCore's latest poses).
+     */
+    private fun stopSurvey(then: (() -> Unit)?, refine: Boolean = true) {
         val r = recorder ?: run { then?.invoke() ?: toast("Not recording."); return }
         recorder = null; policy = null
         lastStatus = ""
+        if (!refine) { finishSurvey(r, null, then); return }
+        toast("Saving the 3D scan – correcting drift…")
+        pendingStop.set(r to then)
+        actions.add { _ ->
+            val (rr, then1) = pendingStop.getAndSet(null) ?: return@add
+            val obs = surveyAnchors.map { (n, a, then0) ->
+                val tracking = a.trackingState == TrackingState.TRACKING
+                PoseRefinement.Obs(n, then0, if (tracking) a.pose.let { Rigid(it.rotationQuaternion, it.translation) } else null, tracking)
+            }
+            surveyAnchors.forEach { it.second.detach() }; surveyAnchors.clear()
+            finishSurvey(rr, obs, then1)
+        }
+    }
+
+    private fun finishSurvey(r: SurveyRecorder, anchors: List<PoseRefinement.Obs>?, then: (() -> Unit)?) {
         Thread {
-            val res = runCatching { r.finish(BuildConfig.VERSION_NAME) }
+            val res = runCatching { r.finish(BuildConfig.VERSION_NAME, anchors) }
             runOnUiThread {
                 res.fold(
                     { m ->
-                        toast("3D scan saved to ${roomName.ifEmpty { "the room" }}: ${m.optInt("validFrameCount")}/${m.optInt("frameCount")} keyframes used, ${m.optInt("pointCount")} points.")
+                        val pr = m.optJSONObject("poseRefinement")
+                        val drift = if (pr != null && pr.optInt("framesCorrected") > 0)
+                            String.format(Locale.US, " Drift corrected (median %.0f mm).", pr.optDouble("medianCorrectionMm")) else " No drift correction available."
+                        toast("3D scan saved to ${roomName.ifEmpty { "the room" }}: ${m.optInt("validFrameCount")}/${m.optInt("frameCount")} keyframes used, ${m.optInt("pointCount")} points.$drift")
                         val pid = projectId; val sid = r.dir.name
                         if (pid != null) ScanEvents.post(JSONObject().put("type", "scan.saved").put("projectId", pid).put("roomId", roomId)
                             .put("scanId", sid).put("date", System.currentTimeMillis()).put("frames", m.optInt("frameCount"))
@@ -488,7 +518,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     private fun viewSurvey() {
-        if (recorder != null) { stopSurvey { viewSurvey() }; return }
+        if (recorder != null) { stopSurvey({ viewSurvey() }); return }
         val dir = lastSurveyDir ?: latestSurvey() ?: run { toast("No 3D survey yet. Tap Record 3D first."); return }
         startActivity(Intent(this, SurveyViewerActivity::class.java).putExtra(SurveyViewerActivity.EXTRA_DIR, dir.absolutePath))
     }
@@ -503,7 +533,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     private fun exportSurvey() {
-        if (recorder != null) { stopSurvey { exportSurvey() }; return }
+        if (recorder != null) { stopSurvey({ exportSurvey() }); return }
         val dir = lastSurveyDir ?: latestSurvey() ?: run { toast("No 3D survey to export yet."); return }
         if (!File(dir, "manifest.json").isFile) { toast("This survey is still being saved – try again in a moment."); return }
         saveZip.launch("LaserPlan-survey-${dir.name}.zip")
@@ -550,7 +580,14 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
                     rgbTimestampNs = if (nv21 != null) frame.timestamp else 0L, rgbPose = if (nv21 != null) rgbPose else null,
                     rgbIntrinsics = if (nv21 != null && rgbK.width == rgbW && rgbK.height == rgbH) rgbK else null,
                     saveJpeg = pol.taken % SurveyConfig.RGB_EVERY_N_KEYFRAMES == 0))
-                if (ok) pol.captured(now, tNow, qNow)
+                if (ok) {
+                    pol.captured(now, tNow, qNow)
+                    val n = r.frames.get()
+                    if ((n - 1) % SurveyConfig.ANCHOR_EVERY_N_KEYFRAMES == 0) runCatching {
+                        val pose = Pose(rec.translation, rec.quaternion)
+                        session?.createAnchor(pose)?.let { surveyAnchors += Triple(n, it, Rigid(rec.quaternion.copyOf(), rec.translation.copyOf())) }
+                    }
+                }
             } finally { conf?.close() }
         } finally { depthImg.close() }
     }
