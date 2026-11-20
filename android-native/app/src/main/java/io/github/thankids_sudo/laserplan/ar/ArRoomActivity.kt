@@ -406,7 +406,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     private fun finishRoom() {
-        if (recorder != null) { toast("Saving the 3D scan first…"); stopSurvey { finishRoom() }; return }
+        if (recorder != null) { toast("Saving the 3D scan first…"); stopSurvey({ finishRoom() }); return }
         finishRoomNow()
     }
 
@@ -518,7 +518,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     private fun viewSurvey() {
-        if (recorder != null) { stopSurvey { viewSurvey() }; return }
+        if (recorder != null) { stopSurvey({ viewSurvey() }); return }
         val dir = lastSurveyDir ?: latestSurvey() ?: run { toast("No 3D survey yet. Tap Record 3D first."); return }
         startActivity(Intent(this, SurveyViewerActivity::class.java).putExtra(SurveyViewerActivity.EXTRA_DIR, dir.absolutePath))
     }
@@ -533,7 +533,7 @@ class ArRoomActivity : AppCompatActivity(), GLSurfaceView.Renderer {
     }
 
     private fun exportSurvey() {
-        if (recorder != null) { stopSurvey { exportSurvey() }; return }
+        if (recorder != null) { stopSurvey({ exportSurvey() }); return }
         val dir = lastSurveyDir ?: latestSurvey() ?: run { toast("No 3D survey to export yet."); return }
         if (!File(dir, "manifest.json").isFile) { toast("This survey is still being saved – try again in a moment."); return }
         saveZip.launch("LaserPlan-survey-${dir.name}.zip")
