@@ -74,11 +74,12 @@ class PoseRefinementTest {
 }
 
 class RefinedRecorderTest {
+    private fun mm16(vararg mm: Int) = ByteArray(mm.size * 2).also { b -> mm.forEachIndexed { i, v -> b[i * 2] = v.toByte(); b[i * 2 + 1] = (v shr 8).toByte() } }
+
     @Test fun anchorsMoveTheSavedCloud() {
         val dir = Files.createTempDirectory("survey").toFile()
         val rec = SurveyRecorder(dir, JSONObject(), JSONObject())
-        val u16 = { vararg mm: Int -> ByteArray(mm.size * 2).also { b -> mm.forEachIndexed { i, v -> b[i * 2] = v.toByte(); b[i * 2 + 1] = (v shr 8).toByte() } } }
-        assertTrue(rec.submit(Keyframe(u16(1000, 1200, 0, 0), null, 2, 2, Intrinsics(2.0, 2.0, 1.0, 1.0, 2, 2), Intrinsics(2.0, 2.0, 1.0, 1.0, 2, 2),
+        assertTrue(rec.submit(Keyframe(mm16(1000, 1200, 0, 0), null, 2, 2, Intrinsics(2.0, 2.0, 1.0, 1.0, 2, 2), Intrinsics(2.0, 2.0, 1.0, 1.0, 2, 2),
             floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f), floatArrayOf(0f, 0f, 0f), floatArrayOf(0f, 0f, 0f, 1f),
             5_000_000_000, 5_000_000_000, null, "not-requested")))
         // The anchor placed at keyframe 1 has since moved 1 m along +X in ARCore's refined map.
