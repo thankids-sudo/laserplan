@@ -644,6 +644,30 @@ Each room has a **Wall line** setting that controls which side of the drawn line
 - The plan DXF was read back with ezdxf: 0 audit errors.
 - Full suite t7 and t17–t39 passes (`bw_main` 14.3292).
 
+## 3S. Version 19 (app 13.13): wall thickness, type and height when drawing
+
+In **Draw** mode a strip under the hint sets what the next walls get:
+- **Wall thickness:** chips for 115, 150, 200, 230, 300 and 345 mm, or a typed value from 50 to 1000 mm.
+- **Main / Partition:** with the thickness at the default, Partition uses the partition thickness from Building spec.
+- **Height:** the room height. Type it, or tap the box and shoot the meter with the rear edge on the floor, aimed at the ceiling.
+
+How changes apply:
+- **Walls and rooms drawn in this session** take the values. A thickness equal to the spec default is not stored on the wall, so later Building spec changes still apply.
+- **Changing the thickness** also updates the walls already drawn in the current room, including after you go back into Draw.
+- **Changing the height** updates the current room only if it was drawn in this session (or has no walls yet). Otherwise it is kept for the next room.
+- **Walls drawn earlier are never changed from here**; use Walls → Edit for those.
+- **The choices are saved with the project.** The strip hides in the other modes.
+
+**Tests:**
+- `t40` covers:
+  - showing and hiding the strip;
+  - thickness and height on a new room;
+  - thickness updates to walls just drawn, and no override stored at the default;
+  - partition, a typed thickness and the height from the laser;
+  - remembering the choices after a reload;
+  - older rooms untouched, and undo.
+- Full suite t7 and t17–t40 passes (`bw_main` 14.3292).
+
 ## 4. Excel workbook
 
 | Sheet | Contents |

@@ -54,6 +54,9 @@ canvas#cv{position:absolute;inset:0;width:100%;height:100%;touch-action:none;dis
 .lcd{background:#c9d6b8;color:#1b2414;border-radius:8px;padding:6px 12px 4px;font-family:var(--f-num);font-weight:600;font-size:26px;line-height:1;box-shadow:inset 0 0 0 2px #0006,0 4px 14px #0007;min-width:150px;transition:transform .15s}
 .lcd small{display:block;font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:3px}
 .lcd.flash{transform:scale(1.06)}
+.v19bar{pointer-events:auto;display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:#0b1828e6;border:1px solid var(--edge);border-radius:8px;padding:4px 6px;max-width:min(92vw,560px);font-size:12px}.v19bar .v19l{color:var(--muted);margin:0 2px}
+.v19c{height:28px;min-width:38px;padding:0 6px;border-radius:7px;border:1px solid var(--edge);background:var(--panel);font-family:var(--f-num);font-size:12px}.v19c.on{background:var(--sel);color:#1b1300;border-color:var(--sel)}
+.v19bar input{width:58px;height:28px;border-radius:7px;border:1px solid var(--edge);background:var(--paper);padding:0 5px;font-family:var(--f-num);font-size:12px}
 .hint{font-size:13px;color:var(--ink);background:#0b1828d9;border:1px solid var(--edge);border-radius:8px;padding:5px 9px;max-width:min(78vw,360px)}
 .hint b{color:var(--sel)}
 .badge-ex{position:absolute;right:max(12px,env(safe-area-inset-right,0px));top:12px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--warn);border:1px dashed var(--warn);border-radius:6px;padding:3px 7px;pointer-events:none}
@@ -296,7 +299,7 @@ input.lzcur{outline:3px solid #2f80ff;outline-offset:1px}input.lzok{border-color
   </header>
   <main class="stage" id="stage">
     <canvas id="cv"></canvas>
-    <div class="hud"><div class="lcd" id="lcd"><small>Last reading</small><span id="lcdVal">– – –</span></div><div class="hint" id="hint"></div><div id="stack" aria-label="Recent laser readings"></div></div>
+    <div class="hud"><div class="lcd" id="lcd"><small>Last reading</small><span id="lcdVal">– – –</span></div><div class="hint" id="hint"></div><div class="v19bar" id="v19Bar" hidden></div><div id="stack" aria-label="Recent laser readings"></div></div>
     <div class="badge-ex" id="exBadge" hidden>Example building</div>
     <div class="pad" id="pad" hidden></div>
     <div class="lzbar" id="lzBar" hidden aria-live="polite"></div>
@@ -526,7 +529,7 @@ function saveProject(){ if(!P) return; P.updated=Date.now(); const all=lsGet(LS_
 function snapshot(){ S.undo.push(JSON.stringify(P)); if(S.undo.length>80) S.undo.shift(); S.redo.length=0; }
 function undo(){ if(!S.undo.length) return; S.redo.push(JSON.stringify(P)); P=JSON.parse(S.undo.pop()); S.sel=Math.min(S.sel,R().walls.length-1); afterChange(); }
 function redo(){ if(!S.redo.length) return; S.undo.push(JSON.stringify(P)); P=JSON.parse(S.redo.pop()); afterChange(); }
-function afterChange(){ saveProject(); syncUi(); draw(); }
+function afterChange(){ try{ v19Apply(); }catch(e){} saveProject(); syncUi(); draw(); }
 function mutate(fn){ snapshot(); P.example=false; const pre=lockMap(); fn(); const r=R(); if(P.settings.autoSolve&&r.closed) solveClosure(r);
   const v=lockCheck(pre); if(v.length){ P=JSON.parse(S.undo.pop()); S.sel=Math.min(S.sel,R().walls.length-1); lockBlocked(v); afterChange(); return false; }
   ensureIds(); v9Fix(); afterChange(); return true; }
@@ -1078,7 +1081,7 @@ function drawOverlays(){
 /* ===================== Panel & UI sync ===================== */
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function setMode(m){ S.mode=m; S.areaPts=null; S.split=null; S.drag=null; S.dimA=null; S.lineAnchor=null; S.cursor=null; S.vsel=-1; for(const b of document.querySelectorAll('.tool[data-mode]')) b.classList.toggle('on',b.dataset.mode===m); $('pad').hidden=m!=='trace'; $('linebar').hidden=!(m==='draw'&&S.tool.draw==='line'); cv.style.cursor=m==='draw'||m==='cad'?'crosshair':'default'; $('cmdbar').hidden=m!=='cad'; if(m!=='cad'){ CAD.tool=null; CAD.st=null; } else setTimeout(cadRefresh,0); buildPad(); buildStrip(); syncUi(); draw(); }
+function setMode(m){ S.mode=m; S.areaPts=null; S.split=null; S.drag=null; S.dimA=null; S.lineAnchor=null; S.cursor=null; S.vsel=-1; for(const b of document.querySelectorAll('.tool[data-mode]')) b.classList.toggle('on',b.dataset.mode===m); $('pad').hidden=m!=='trace'; if(m==='draw'){ if(typeof v19Start==='function') v19Start(); } else { if(typeof V19!=='undefined') V19.on=false; const vb=$('v19Bar'); if(vb) vb.hidden=true; } $('linebar').hidden=!(m==='draw'&&S.tool.draw==='line'); cv.style.cursor=m==='draw'||m==='cad'?'crosshair':'default'; $('cmdbar').hidden=m!=='cad'; if(m!=='cad'){ CAD.tool=null; CAD.st=null; } else setTimeout(cadRefresh,0); buildPad(); buildStrip(); syncUi(); draw(); }
 function buildPad(){ const order=[225,270,315,180,null,0,135,90,45], map=Object.fromEntries(DIRS), pad=$('pad'); pad.innerHTML=''; const r=R();
   for(const a of order){ const b=document.createElement('button');
     if(a===null){ b.className='mid'; b.textContent=r.walls.length>=2&&!r.closed?'CLOSE':'NEW';
@@ -4362,6 +4365,39 @@ function v18Set(m){ const r=R(); if(!r) return; mutate(()=>{ if(m==='auto') dele
   toast(`Wall line ${V18_LAB[m]}: ${m==='cl'?'thickness centred on the line':m==='auto'?(r.closed?'thickness outside the room (line = inside face)':'thickness to the left'):'thickness to the '+m+' of the drawing direction'}. Quantities unchanged.`); }
 function v18Next(r){ const k=Object.keys(V18_LAB); return k[(k.indexOf(v18Mode(r))+1)%k.length]; }
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-wj]'); if(!b) return; const r=R(); if(!r) return; v18Set(b.dataset.wj==='next'?v18Next(r):b.dataset.wj); });
+
+/* ===================== v19: wall thickness, type and room height when drawing =====================
+   In Draw mode a strip under the hint sets what the next walls get: thickness (preset chips or typed, mm), Main or
+   Partition, and the room height (typed or shot with the meter: rear edge on the floor, aim at the ceiling).
+   Walls drawn in this session take the thickness and type; changing the thickness also updates the walls already
+   drawn in this session. A new room takes the height; changing the height also updates the current room if it was drawn in this session.
+   Walls drawn earlier are never changed from here (use Walls tab → Edit for those). */
+const V19={t:null,type:'main',h:null,seenW:new Set(),seenR:new Set(),mine:new Set(),myR:new Set(),on:false};
+const V19_T=[0.115,0.150,0.200,0.230,0.300,0.345];
+function v19Def(type){ return type==='part'?P.spec.partT:P.spec.mainT; }
+function v19T(){ return V19.t||v19Def(V19.type); }
+function v19Start(){ V19.seenW=new Set(); V19.seenR=new Set(); for(const r of P.rooms){ V19.seenR.add(r.id); for(const w of r.walls) V19.seenW.add(w.id); }
+  const sv=(P.settings&&P.settings.v19)||{}; if(sv.pid!==P.id){ V19.mine=new Set(); V19.myR=new Set(); } if(sv.t!==undefined) V19.t=sv.t; if(sv.type) V19.type=sv.type; if(sv.h) V19.h=sv.h;
+  if(V19.h==null) V19.h=(R()&&R().height)||P.spec.height||3.0; V19.on=true; v19Save(); v19Bar(); }
+function v19Save(){ if(P&&P.settings) P.settings.v19={t:V19.t,type:V19.type,h:V19.h,pid:P.id}; }
+/** Gives walls and rooms created since Draw mode started the chosen thickness / type / height. Called before saving. */
+function v19Apply(){ if(!V19.on||S.mode!=='draw'||!P) return; ensureIds();
+  for(const r of P.rooms){ if(!V19.seenR.has(r.id)){ V19.seenR.add(r.id); V19.myR.add(r.id); if(V19.h>0) r.height=V19.h; }
+    for(const w of r.walls){ if(V19.seenW.has(w.id)) continue; V19.seenW.add(w.id); V19.mine.add(w.id); v19Set(w); } } }
+function v19Set(w){ if(V19.type==='part') w.type='part'; else delete w.type; const t=v19T(); if(Math.abs(t-v19Def(V19.type))>1e-6) w.t=t; else delete w.t; }
+function v19Bar(){ const b=$('v19Bar'); if(!b) return; b.hidden=S.mode!=='draw'; if(b.hidden) return; const t=v19T();
+  b.innerHTML=`<span class="v19l">Wall</span>${V19_T.map(v=>`<button class="v19c${Math.abs(v-t)<1e-6?' on':''}" data-v19t="${v}">${Math.round(v*1000)}</button>`).join('')}
+    <input id="v19Tin" inputmode="numeric" value="${Math.round(t*1000)}" aria-label="Wall thickness in mm" title="Wall thickness (mm)"><span class="v19l">mm</span>
+    <button class="v19c${V19.type==='part'?' on':''}" data-v19p title="Partition (half-brick) or main wall">${V19.type==='part'?'Partition':'Main'}</button>
+    <span class="v19l">Height</span><input id="v19Hin" data-laser inputmode="decimal" value="${toUnitNum(V19.h||3)}" aria-label="Room height" title="Room height – type it or shoot the meter at the ceiling"><span class="v19l">${P.unit}</span>`;
+  $('v19Tin').onchange=e=>{ const v=(+e.target.value)/1000; if(!(v>=0.05&&v<=1.0)){ toast('Thickness 50–1000 mm'); v19Bar(); return; } v19SetT(v); };
+  $('v19Hin').onchange=e=>{ const v=parseLen(e.target.value,P.unit); if(!(v>=1.5&&v<=12)){ toast('Room height 1.5–12 m'); v19Bar(); return; } V19.h=v; v19Save(); const r=R(), own=r&&(V19.myR.has(r.id)||!r.walls.length); if(own) mutate(()=>{ r.height=v; }); toast(`Room height ${fmt(v)}${own?' – '+r.name:' for the next room'}`); v19Bar(); }; }
+function v19SetT(v){ V19.t=v; v19Save(); const mine=[], r0=R(); if(r0) for(const w of r0.walls) if(V19.mine.has(w.id)) mine.push(w);
+  if(mine.length) mutate(()=>{ for(const w of mine) v19Set(w); });
+  toast(`Wall thickness ${Math.round(v*1000)} mm${mine.length?` – ${mine.length} wall${mine.length>1?'s':''} drawn now updated`:' for the next walls'}`); v19Bar(); draw(); }
+document.addEventListener('click',e=>{ const c=e.target.closest&&e.target.closest('[data-v19t],[data-v19p]'); if(!c) return;
+  if(c.dataset.v19t) v19SetT(+c.dataset.v19t);
+  else { const wasDef=V19.t==null||Math.abs(V19.t-v19Def(V19.type))<1e-6; V19.type=V19.type==='part'?'main':'part'; if(wasDef) V19.t=null; v19SetT(v19T()); } });
 
 /* ===================== Wiring ===================== */
 document.addEventListener('click',e=>{ const q=e.target.closest&&e.target.closest('[data-qa]'); if(q){ const L=(qaChecks()[+q.dataset.qa]||[])[2]; if(L) v17Show(L); return; }
