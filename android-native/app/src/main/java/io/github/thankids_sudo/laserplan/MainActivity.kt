@@ -33,6 +33,7 @@ import io.github.thankids_sudo.laserplan.laser.HidKeyCollector
 import io.github.thankids_sudo.laserplan.laser.LaserManager
 import io.github.thankids_sudo.laserplan.laser.diagnostics.Diagnostics
 import io.github.thankids_sudo.laserplan.survey.ScanEvents
+import io.github.thankids_sudo.laserplan.survey.ScanSlice
 import io.github.thankids_sudo.laserplan.survey.ScanStore
 import io.github.thankids_sudo.laserplan.survey.SurveyRecorder
 import io.github.thankids_sudo.laserplan.survey.SurveyViewerActivity
@@ -189,6 +190,11 @@ class MainActivity : AppCompatActivity() {
                 pendingZip = it; saveZip.launch("LaserPlan-scan-${cmd.scanId}.zip")
             } ?: post(Bridge.toast("That 3D scan is no longer on this phone."))
             is WebCommand.ScanDelete -> lifecycleScope.launch(Dispatchers.IO) { ScanStore.delete(this@MainActivity, cmd.projectId, cmd.scanId) }
+            is WebCommand.ScanSlice -> lifecycleScope.launch(Dispatchers.IO) {
+                val dir = ScanStore.scanDir(this@MainActivity, cmd.projectId, cmd.scanId)?.takeIf { File(it, "manifest.json").isFile }
+                val msg = runCatching { dir?.let { ScanSlice.fromDir(it) }?.let { ScanSlice.message(cmd.projectId, cmd.scanId, it) } }.getOrNull()
+                launch(Dispatchers.Main) { post(msg ?: Bridge.toast("That 3D scan is not on this phone or has no points yet.")) }
+            }
             is WebCommand.ScansDeleteProject -> lifecycleScope.launch(Dispatchers.IO) { ScanStore.deleteProject(this@MainActivity, cmd.projectId) }
             is WebCommand.Save -> {
                 pendingSave = cmd

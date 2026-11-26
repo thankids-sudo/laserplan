@@ -264,6 +264,7 @@ table.v9t{width:100%;border-collapse:collapse;font-size:13px}table.v9t td,table.
 .v16kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:8px 0}.v16kpi div{border:1px solid var(--line);border-radius:10px;padding:6px 8px;display:flex;flex-direction:column}.v16kpi small{color:var(--muted)}
 .v16t{width:100%;border-collapse:collapse;font-size:13px}.v16t th,.v16t td{padding:4px 5px;text-align:left;border-bottom:1px solid var(--line)}.v16t tr[data-v16r]{cursor:pointer}
 .v17q{cursor:pointer;border-radius:6px;padding:2px 4px;margin:0 -4px}.v17q:hover,.v17q:active{background:rgba(255,140,40,.14)}.v17pin{margin-left:auto;opacity:.8}
+.v20box{border:1px solid rgba(64,210,255,.45);border-radius:10px;padding:6px 8px;margin:4px 0 8px}
 .v16bar{display:inline-block;width:46px;height:6px;border-radius:3px;background:var(--line);margin-right:5px;vertical-align:middle;overflow:hidden}.v16bar i{display:block;height:100%;background:#3ddc84}.v16c{cursor:pointer}.qlT td:first-child{color:var(--muted)}
 input.lzcur{outline:3px solid #2f80ff;outline-offset:1px}input.lzok{border-color:#3ddc84!important}#v14Bar{align-items:center;gap:8px;flex-wrap:wrap}
 .v11gen .v11gi{display:flex;align-items:center;gap:6px}.v11gen .v11gi .toggle{flex:1}.v11p{width:70px;height:30px;border-radius:8px;border:1px solid var(--edge);background:var(--paper);color:var(--ink);padding:0 6px;font-family:var(--f-num)}
@@ -771,7 +772,7 @@ function draw(){
     if(r.closed){ const c=bbox(q), cs=W2S({x:(c.minx+c.maxx)/2,y:(c.miny+c.maxy)/2}); ctx.textAlign='center'; ctx.fillStyle='rgba(219,229,242,.85)'; ctx.font='700 15px '+css('--f-cond');
       ctx.fillText(r.name,cs.x,cs.y-9); ctx.font='500 12px '+css('--f-num'); ctx.fillStyle=css('--muted'); ctx.fillText(fmtArea(polyArea(r)),cs.x,cs.y+9); }
   }
-  lzOverlay(); v9Over(); v11Draw(); drawOverlays(); v17Over(); drawHover();
+  v20Over(); lzOverlay(); v9Over(); v11Draw(); drawOverlays(); v17Over(); drawHover();
   if(S.stroke&&S.stroke.length>1){ ctx.strokeStyle=css('--laser'); ctx.lineWidth=2.5; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.beginPath(); S.stroke.forEach((p,i)=>{const s=W2S(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)}); ctx.stroke(); }
   if(!n&&!S.stroke&&!S.lineAnchor&&!S.drag){ ctx.fillStyle=css('--muted'); ctx.font='500 16px '+css('--f-ui'); ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(emptyMsg(r),Wd/2,Ht/2); }
@@ -3972,6 +3973,7 @@ function natOn(m){ if(!m||typeof m!=='object') return;
     if(lzWants(src)) lzReading({v,u,src}); else if(mm>0&&isFinite(mm)) onDistanceLegacy(mm,src); }
   else if(m.type==='ar.room') natArRoom(m);
   else if(m.type==='scan.saved') natScanSaved(m);
+  else if(m.type==='scan.slice') v20Receive(m);
   else if(m.type==='toast'&&m.text) toast(String(m.text).slice(0,300));
   else if(m.type==='saved') toast(m.ok?`Saved ${m.name||'file'}.`:`Not saved${m.error?': '+m.error:''}.`); }
 /* Native ARCore result ("laserplan.ar-room" v1): validate, then build the room through the same capToRoom() as WebXR. */
@@ -3999,7 +4001,7 @@ function natScanSaved(m){ if(!natSafe(m.projectId)||!natSafe(m.scanId)) return;
 function natScansHTML(r){ if(!NAT.on) return ''; const L=r.scans||[];
   const mb=b=>(b/1048576).toFixed(1)+' MB', when=t=>new Date(t).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   return `<div class="field"><label>3D scans of this room</label>${L.length?L.map(s=>`<div class="row" style="align-items:center"><span class="lzsmall" style="flex:1">${esc(when(s.date))} · ${s.valid}/${s.frames} frames · ${(s.points/1000).toFixed(0)}k points · ${mb(s.bytes)}</span>
-    <button class="btn sm" data-scv="${esc(s.id)}">View</button><button class="btn sm" data-sce="${esc(s.id)}">Export</button><button class="btn sm danger" data-scd="${esc(s.id)}">Delete</button></div>`).join('')
+    <button class="btn sm${V20.show[s.id]?' go':''}" data-scp="${esc(s.id)}" title="Show the scan under the plan">Plan</button><button class="btn sm" data-scv="${esc(s.id)}">View</button><button class="btn sm" data-sce="${esc(s.id)}">Export</button><button class="btn sm danger" data-scd="${esc(s.id)}">Delete</button></div>${v20Panel(r,s)}`).join('')
     :'<p class="lzsmall">No 3D scan yet. Capture room shape → Start AR → ● Record 3D. The scan is kept with this room.</p>'}
     ${L.length?`<p class="lzsmall">Total for this room: ${mb(L.reduce((a,s)=>a+s.bytes,0))}. Scans stay on this phone.</p>`:''}</div>`; }
 function natScansWire(r){ if(!NAT.on) return;
@@ -4398,6 +4400,111 @@ function v19SetT(v){ V19.t=v; v19Save(); const mine=[], r0=R(); if(r0) for(const
 document.addEventListener('click',e=>{ const c=e.target.closest&&e.target.closest('[data-v19t],[data-v19p]'); if(!c) return;
   if(c.dataset.v19t) v19SetT(+c.dataset.v19t);
   else { const wasDef=V19.t==null||Math.abs(V19.t-v19Def(V19.type))<1e-6; V19.type=V19.type==='part'?'main':'part'; if(wasDef) V19.t=null; v19SetT(v19T()); } });
+
+/* ===================== v20: 3D scan under the plan (Phase C, step 1) =====================
+   The phone sends a compact top-view "wall slice" of a scan: the 3D points between floor and ceiling (2nd–98th height
+   percentile, minus 0.2 m), reduced to one point per 3 cm cell – a 2D summary, never the point cloud itself.
+   The web app fits the slice to the room outline (rotation search for the dominant wall direction, 4 × 90° and
+   mirror candidates, then trimmed nearest-wall ICP) and draws it under the plan. Per wall it reports where the
+   scanned face lies relative to the drawn line (mode of the offsets, mm) and how spread the scan is there – a wide
+   spread means the scan is too rough at that wall to judge millimetres. Without an outline, the slice is placed
+   square to the grid so the walls can be traced over it with Draw. Nothing is changed in the plan automatically. */
+const V20={slices:{},show:{},busy:{}};
+function v20Ang(pts,mir){ const n=pts.length/2; let best=0,bs=-1; const step=0.05, xs=new Float64Array(n), ys=new Float64Array(n);
+  for(let d=0;d<90;d+=0.5){ const t=d*Math.PI/180, c=Math.cos(t), s=Math.sin(t); let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
+    for(let i=0;i<n;i++){ const X=pts[2*i], Z=mir?-pts[2*i+1]:pts[2*i+1]; xs[i]=X*c+Z*s; ys[i]=-X*s+Z*c; if(xs[i]<x0)x0=xs[i]; if(xs[i]>x1)x1=xs[i]; if(ys[i]<y0)y0=ys[i]; if(ys[i]>y1)y1=ys[i]; }
+    const hx=new Float64Array(Math.ceil((x1-x0)/step)+2), hy=new Float64Array(Math.ceil((y1-y0)/step)+2);
+    for(let i=0;i<n;i++){ hx[Math.floor((xs[i]-x0)/step)]++; hy[Math.floor((ys[i]-y0)/step)]++; }
+    let sc=0; for(const v of hx) sc+=v*v; for(const v of hy) sc+=v*v; if(sc>bs){ bs=sc; best=t; } }
+  return best; }
+/** Plan position of slice point i under registration g. */
+function v20Map(g,X,Z){ const z=g.mir?-Z:Z, c=Math.cos(g.th), s=Math.sin(g.th); return {x:X*c-z*s+g.tx,y:X*s+z*c+g.ty}; }
+function v20Segs(r){ const q=pts(r), out=[]; for(let i=0;i<r.walls.length;i++) out.push([q[i],q[i+1]]); return out; }
+function v20Near(segs,p){ let bd=1e9,bp=null,bi=-1; for(let i=0;i<segs.length;i++){ const [a,b]=segs[i], dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1e-12;
+    const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/L2)), x=a.x+dx*t, y=a.y+dy*t, d=Math.hypot(p.x-x,p.y-y); if(d<bd){ bd=d; bp={x,y}; bi=i; } } return {d:bd,p:bp,i:bi}; }
+/** Fits a slice to room r. Returns the registration {th,tx,ty,mir,score}. */
+function v20Fit(r,sl){ const SP=sl.pts, n=SP.length/2, segs=v20Segs(r);
+  const idx=[]; const stp=Math.max(1,Math.floor(n/1200)); for(let i=0;i<n;i+=stp) idx.push(i);
+  if(segs.length<3){ const th=-v20Ang(SP,false); let sx=0,sy=0; for(const i of idx){ const p=v20Map({th,tx:0,ty:0,mir:false},SP[2*i],SP[2*i+1]); sx+=p.x; sy+=p.y; }
+    const rc=cv.getBoundingClientRect(), c=S2W(rc.width/2,rc.height/2); return {th,tx:c.x-sx/idx.length,ty:c.y-sy/idx.length,mir:false,score:0,free:true}; }
+  // dominant plan direction: longest wall
+  let lw=0,pa=0; for(const [a,b] of segs){ const L=Math.hypot(b.x-a.x,b.y-a.y); if(L>lw){ lw=L; pa=Math.atan2(b.y-a.y,b.x-a.x); } }
+  const poly=pts(r).slice(0,-1); let cx=0,cy=0; for(const p of poly){ cx+=p.x; cy+=p.y; } cx/=poly.length; cy/=poly.length;
+  let best=null;
+  for(const mir of [false,true]){ const sa=v20Ang(SP,mir);
+    for(let k=0;k<4;k++){ let g={th:pa-sa+k*Math.PI/2,tx:0,ty:0,mir};
+      // median of mapped points → plan centre
+      const xs=[],ys=[]; for(const i of idx){ const p=v20Map(g,SP[2*i],SP[2*i+1]); xs.push(p.x); ys.push(p.y); } xs.sort((a,b)=>a-b); ys.sort((a,b)=>a-b);
+      g.tx=cx-xs[xs.length>>1]; g.ty=cy-ys[ys.length>>1];
+      for(let it=0;it<20;it++){ const thr=Math.max(0.12,0.6-it*0.04), A=[],B=[];
+        for(const i of idx){ const p=v20Map(g,SP[2*i],SP[2*i+1]), nn=v20Near(segs,p); if(nn.d<thr){ A.push(p); B.push(nn.p); } }
+        if(A.length<20) break;
+        let ax=0,ay=0,bx=0,by=0; for(let j=0;j<A.length;j++){ ax+=A[j].x; ay+=A[j].y; bx+=B[j].x; by+=B[j].y; } ax/=A.length; ay/=A.length; bx/=A.length; by/=A.length;
+        let sxx=0,sxy=0; for(let j=0;j<A.length;j++){ const u=A[j].x-ax, v=A[j].y-ay, U=B[j].x-bx, V=B[j].y-by; sxx+=u*U+v*V; sxy+=u*V-v*U; }
+        const dth=Math.atan2(sxy,sxx), c=Math.cos(dth), s=Math.sin(dth);
+        // rotate about A's centroid then move it onto B's
+        const ntx=c*(g.tx-ax)-s*(g.ty-ay)+bx, nty=s*(g.tx-ax)+c*(g.ty-ay)+by; g={th:g.th+dth,tx:ntx,ty:nty,mir};
+        if(Math.abs(dth)<1e-5&&Math.hypot(ntx-g.tx,nty-g.ty)<1e-5) break; }
+      let hit=0; for(const i of idx){ if(v20Near(segs,v20Map(g,SP[2*i],SP[2*i+1])).d<0.10) hit++; } g.score=hit/idx.length;
+      if(!best||g.score>best.score) best=g; } }
+  return best; }
+/** Per wall: where the scanned face lies relative to the drawn line (+ = beyond the line, away from the room), mm. */
+function v20Dev(r,sl,g){ const segs=v20Segs(r), out=[], SP=sl.pts, n=SP.length/2;
+  const mp=[]; for(let i=0;i<n;i++) mp.push(v20Map(g,SP[2*i],SP[2*i+1]));
+  segs.forEach(([a,b],i)=>{ const L=Math.hypot(b.x-a.x,b.y-a.y); if(L<0.4){ out.push(null); return; } const ux=(b.x-a.x)/L, uy=(b.y-a.y)/L, G=wallG(r,i), nx=G.nx, ny=G.ny, off=[];
+    for(const p of mp){ const s=(p.x-a.x)*ux+(p.y-a.y)*uy; if(s<L*0.15||s>L*0.85) continue; const d=(p.x-a.x)*nx+(p.y-a.y)*ny; if(Math.abs(d)<0.35) off.push(d); }
+    if(off.length<15){ out.push({n:off.length}); return; }
+    const h=new Float64Array(71); for(const d of off) h[Math.min(70,Math.max(0,Math.round((d+0.35)*100)))]++;
+    let bk=0,bv=-1; for(let k=2;k<69;k++){ const v=h[k-2]+2*h[k-1]+3*h[k]+2*h[k+1]+h[k+2]; if(v>bv){ bv=v; bk=k; } } let mode=bk/100-0.35;
+    let near=off.filter(d=>Math.abs(d-mode)<0.04); if(near.length>4){ near.sort((x,y)=>x-y); mode=near[near.length>>1]; } // refine: median near the peak
+    near=off.filter(d=>Math.abs(d-mode)<0.08).sort((x,y)=>x-y); const q=k=>near[Math.min(near.length-1,Math.floor(near.length*k))];
+    out.push({n:off.length,mm:Math.round(mode*1000),spread:near.length>4?Math.round((q(0.75)-q(0.25))*1000):null}); });
+  return out; }
+/** Opposite, parallel walls facing each other: drawn span vs scanned span (= drawn + both face offsets). */
+function v20Spans(r,dv){ const segs=v20Segs(r), out=[];
+  for(let i=0;i<segs.length;i++) for(let j=i+1;j<segs.length;j++){ const [a,b]=segs[i],[c,d]=segs[j], Li=Math.hypot(b.x-a.x,b.y-a.y), Lj=Math.hypot(d.x-c.x,d.y-c.y); if(Li<0.4||Lj<0.4) continue;
+    const ui={x:(b.x-a.x)/Li,y:(b.y-a.y)/Li}, uj={x:(d.x-c.x)/Lj,y:(d.y-c.y)/Lj}; if(ui.x*uj.x+ui.y*uj.y>-0.9986) continue; // antiparallel within 3°
+    const s1=(c.x-a.x)*ui.x+(c.y-a.y)*ui.y, s2=(d.x-a.x)*ui.x+(d.y-a.y)*ui.y, ov=Math.min(Li,Math.max(s1,s2))-Math.max(0,Math.min(s1,s2)); if(ov<0.3) continue;
+    const gap=Math.abs(-(c.x-a.x)*ui.y+(c.y-a.y)*ui.x); const di=dv[i], dj=dv[j]; if(!di||!dj||di.mm==null||dj.mm==null) continue;
+    // nothing in between: the nearest antiparallel wall only
+    if(out.some(o=>o.i===i&&o.gap<gap)) continue;
+    const rough=(di.spread==null||di.spread>40)||(dj.spread==null||dj.spread>40);
+    out.push({i,j,gap,scan:gap+(di.mm+dj.mm)/1000,diff:di.mm+dj.mm,rough}); }
+  return out; }
+function v20Grade(d){ if(!d||d.mm==null) return 'no scan data'; if(d.spread==null||d.spread>40) return 'scan too rough here'; return Math.abs(d.mm)<=15?'agrees':Math.abs(d.mm)<=40?'check':'differs'; }
+function v20Ref(r,id){ return (r.scans||[]).find(s=>s.id===id); }
+/** A slice arrived from the phone (or a test). */
+function v20Receive(m){ if(!m||!m.scanId||!Array.isArray(m.pts)) return; const sl={pts:Float32Array.from(m.pts,v=>v/1000),cell:m.cell||0.03,floor:m.floor,ceil:m.ceil};
+  V20.slices[m.scanId]=sl; V20.busy[m.scanId]=false;
+  const ri=P.rooms.findIndex(r=>v20Ref(r,m.scanId)); if(ri<0) return; const r=P.rooms[ri], ref=v20Ref(r,m.scanId);
+  if(!ref.reg) { const g=v20Fit(r,sl); mutate(()=>{ ref.reg={th:+g.th.toFixed(6),tx:+g.tx.toFixed(4),ty:+g.ty.toFixed(4),mir:g.mir,score:+(g.score||0).toFixed(3),free:!!g.free}; }); }
+  V20.show[m.scanId]=true; afterChange();
+  toast(ref.reg.free?'Scan placed under the plan – trace the walls over it with Draw.':`Scan fitted to ${r.name}: ${Math.round(ref.reg.score*100)}% of wall points within 10 cm of the drawn walls.`); }
+function v20Toggle(id){ const r=R(), ref=v20Ref(r,id); if(!ref) return;
+  if(V20.show[id]){ V20.show[id]=false; afterChange(); return; }
+  if(V20.slices[id]){ V20.show[id]=true; afterChange(); return; }
+  if(typeof NAT!=='undefined'&&NAT.on){ V20.busy[id]=true; natSend({cmd:'scan.slice',projectId:P.id,scanId:id}); toast('Reading the scan…'); }
+  else toast('The scan is on the phone: open this project in the LaserPlan app.'); }
+function v20Refit(id,how){ const r=R(), ref=v20Ref(r,id), sl=V20.slices[id]; if(!ref||!sl) return; let g=ref.reg?Object.assign({},ref.reg):null;
+  if(how==='fit'||!g) g=v20Fit(r,sl);
+  else if(how==='rot'||how==='mir'){ // turn / mirror about the slice centre on the plan
+    let sx=0,sy=0,n=sl.pts.length/2; for(let i=0;i<n;i++){ const p=v20Map(g,sl.pts[2*i],sl.pts[2*i+1]); sx+=p.x; sy+=p.y; } const c={x:sx/n,y:sy/n};
+    const g2=how==='rot'?{th:g.th+Math.PI/2,tx:0,ty:0,mir:g.mir}:{th:g.th,tx:0,ty:0,mir:!g.mir}; let ax=0,ay=0; for(let i=0;i<n;i++){ const p=v20Map(g2,sl.pts[2*i],sl.pts[2*i+1]); ax+=p.x; ay+=p.y; }
+    g=Object.assign(g2,{tx:c.x-ax/n,ty:c.y-ay/n,score:0}); }
+  mutate(()=>{ ref.reg={th:+g.th.toFixed(6),tx:+g.tx.toFixed(4),ty:+g.ty.toFixed(4),mir:!!g.mir,score:+(g.score||0).toFixed(3),free:!!g.free}; }); V20.show[id]=true; afterChange(); }
+function v20Over(){ if(!P) return; const r=R(); if(!r) return; const sc=S.view.s;
+  for(const ref of r.scans||[]){ if(!V20.show[ref.id]||!ref.reg) continue; const sl=V20.slices[ref.id]; if(!sl) continue; const n=sl.pts.length/2, sz=Math.max(1.5,sl.cell*sc);
+    ctx.save(); ctx.fillStyle='rgba(64,210,255,.32)'; for(let i=0;i<n;i++){ const p=W2S(v20Map(ref.reg,sl.pts[2*i],sl.pts[2*i+1])); ctx.fillRect(p.x-sz/2,p.y-sz/2,sz,sz); } ctx.restore(); } }
+/** Panel block under a scan row when it is shown on the plan. */
+function v20Panel(r,ref){ const sl=V20.slices[ref.id]; if(!V20.show[ref.id]||!sl||!ref.reg) return '';
+  const dv=r.walls.length>=3&&!ref.reg.free?v20Dev(r,sl,ref.reg):[];
+  return `<div class="v20box"><div class="row"><b style="flex:1">Scan on plan</b><button class="btn sm" data-v20="fit:${esc(ref.id)}">Fit again</button><button class="btn sm" data-v20="rot:${esc(ref.id)}">Turn 90°</button><button class="btn sm" data-v20="mir:${esc(ref.id)}">Mirror</button></div>
+    ${ref.reg.free?'<p class="lzsmall">No outline yet: the scan is squared to the grid. Use Draw over the cyan walls, then Fit again.</p>':`<p class="lzsmall">Fit: ${Math.round((ref.reg.score||0)*100)}% of scanned wall points within 10 cm of the drawn walls.</p>`}
+    ${dv.length?`<table class="v16t"><tr><th>Wall</th><th>Scanned face vs line</th><th>Scan spread</th><th></th></tr>${dv.map((d,i)=>`<tr><td>W${i+1}</td><td>${d&&d.mm!=null?(d.mm>0?'+':'')+d.mm+' mm':'–'}</td><td>${d&&d.spread!=null?d.spread+' mm':'–'}</td><td><small>${v20Grade(d)}</small></td></tr>`).join('')}</table>
+    ${(()=>{ const sp=v20Spans(r,dv); return sp.length?`<table class="v16t"><tr><th>Span</th><th>Drawn</th><th>Scan</th><th>Diff.</th></tr>${sp.map(o=>`<tr><td>W${o.i+1} ↔ W${o.j+1}</td><td>${fmt(o.gap)}</td><td>${o.rough?'–':fmt(o.scan)}</td><td>${o.rough?'<small>too rough</small>':(o.diff>0?'+':'')+o.diff+' mm'}</td></tr>`).join('')}</table>`:''; })()}
+    <p class="lzsmall">Each wall's offset is after the best fit, so read the spans: scanned wall-to-wall distance vs the drawn one. + means the scanned face lies beyond the drawn line. Laser lengths stay the reference; the scan only shows where to re-check.</p>`:''}</div>`; }
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-v20],[data-scp]'); if(!b) return;
+  if(b.dataset.scp) return v20Toggle(b.dataset.scp); const [how,id]=b.dataset.v20.split(':'); v20Refit(id,how); });
 
 /* ===================== Wiring ===================== */
 document.addEventListener('click',e=>{ const q=e.target.closest&&e.target.closest('[data-qa]'); if(q){ const L=(qaChecks()[+q.dataset.qa]||[])[2]; if(L) v17Show(L); return; }

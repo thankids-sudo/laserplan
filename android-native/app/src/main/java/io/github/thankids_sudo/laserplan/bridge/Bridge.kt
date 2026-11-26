@@ -19,6 +19,7 @@ sealed class WebCommand {
     data class ScanView(val projectId: String, val scanId: String) : WebCommand()
     data class ScanExport(val projectId: String, val scanId: String) : WebCommand()
     data class ScanDelete(val projectId: String, val scanId: String) : WebCommand()
+    data class ScanSlice(val projectId: String, val scanId: String) : WebCommand()
     data class ScansDeleteProject(val projectId: String) : WebCommand()
     data class Save(val name: String, val mime: String, val base64: String) : WebCommand()
 }
@@ -38,10 +39,11 @@ object Bridge {
             "laser.reconnect" -> WebCommand.LaserReconnect
             "laser.disconnect" -> WebCommand.LaserDisconnect
             "ar.open" -> WebCommand.ArOpen(id(o, "projectId"), id(o, "roomId"), o.optString("roomName").take(60))
-            "scan.view", "scan.export", "scan.delete" -> {
+            "scan.view", "scan.export", "scan.delete", "scan.slice" -> {
                 val p = id(o, "projectId"); val s = id(o, "scanId")
                 if (p == null || s == null) null else when (o.optString("cmd")) {
-                    "scan.view" -> WebCommand.ScanView(p, s); "scan.export" -> WebCommand.ScanExport(p, s); else -> WebCommand.ScanDelete(p, s)
+                    "scan.view" -> WebCommand.ScanView(p, s); "scan.export" -> WebCommand.ScanExport(p, s)
+                    "scan.slice" -> WebCommand.ScanSlice(p, s); else -> WebCommand.ScanDelete(p, s)
                 }
             }
             "scans.deleteProject" -> id(o, "projectId")?.let { WebCommand.ScansDeleteProject(it) }

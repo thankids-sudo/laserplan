@@ -668,6 +668,36 @@ How changes apply:
   - older rooms untouched, and undo.
 - Full suite t7 and t17–t40 passes (`bw_main` 14.3292).
 
+## 3T. Version 20 (app 13.14): 3D scan under the plan (Phase C, step 1)
+
+Room panel → *3D scans of this room* → **Plan**.
+
+**What the phone sends.** It cuts a top-view *wall slice* from the scan's processed cloud: the points between floor and ceiling (2nd–98th height percentile minus 0.2 m), one point per 3 cm cell, at most 15,000 cells. It is a small 2D summary for the plan, never the 3D point cloud. The 20 Nov living-room scan gives 11,684 cells.
+
+**Fitting and drawing:**
+- **Fit.** The web plan fits the slice to the room outline:
+  1. search the dominant wall direction by rotation;
+  2. try four 90° turns and a mirrored version;
+  3. refine with a trimmed nearest-wall fit.
+- **Underlay.** The slice is drawn in cyan under the walls.
+- **No outline yet.** The slice is squared to the grid so the walls can be traced over it with Draw.
+- **Manual controls.** **Fit again**, **Turn 90°** and **Mirror**. The fit is saved with the scan reference.
+
+**Checks:**
+- **Per wall:** where the scanned face lies relative to the drawn line (mm), and the scan's spread there. A spread above 40 mm is reported as "scan too rough here".
+- **Spans:** for opposite parallel walls, the drawn vs scanned wall-to-wall distance. A single wall's offset is relative to the best fit, so the spans are the meaningful check.
+- **Nothing in the plan is changed automatically.** Laser lengths stay the reference.
+
+**Field note.** On the 20 Nov scan, taken before the v13.7 drift correction, every wall reads "too rough" (spread 68–79 mm). That is honest: millimetre checks need a drift-corrected scan.
+
+**Tests:**
+- Web test `t41`:
+  - a synthetic rotated and shifted room is recovered to 0.01 rad and 3 cm, and the span check reads +7 mm against a true +7;
+  - a mirrored L-shaped room is recovered, including the mirroring;
+  - the panel and the Fit again / Turn controls work;
+  - the real 20 Nov slice is placed freely and fitted in about 0.12 s.
+- Kotlin `ScanSliceTest`: the box room slice keeps only wall cells, the cap, a flat cloud, reading `cloud.xyzc` and building the message, and bridge ID validation.
+
 ## 4. Excel workbook
 
 | Sheet | Contents |
