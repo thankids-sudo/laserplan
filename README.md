@@ -489,6 +489,52 @@ The native Kotlin app is in `android-native/`; see `android-native/README.md` fo
 * Native ARCore room capture works inside the app: tap the floor corners, set or type the height, and the room arrives in the plan as AR estimates for laser confirmation (v13.1).
 * 3D survey recording (v13.2): **Record 3D / Stop 3D / View 3D / Export ZIP** on the AR screen record ARCore raw depth, confidence, poses and RGB keyframes. The app shows a rotatable point-cloud preview and exports a documented survey ZIP.
 
+## 3N. Version 14 (app 13.8): laser sequence in wall elevations, measured opening sizes, DXF elevations
+
+This version adapts the "sketch, then measure each item in turn" workflow seen in field CAD apps to LaserPlan's wall elevations.
+
+**Laser sequence.** Open a wall (wall window → elevation) and tap a door, window, electrical point or plumbing point. Then tap **📏 Laser: measure this**. Each press of the meter fills the highlighted box and moves on to the next one:
+
+| Item | Order of readings |
+|---|---|
+| Door | from the left corner → width → height |
+| Window | from the left corner → width → height → sill height |
+| Electrical / plumbing point | from the left corner → height above floor |
+
+- **Hints.** A hint under the buttons says where to put the meter for each reading. For example, for the width: rear edge on one jamb, aim at the other.
+- **Moving on.** The last reading applies the item, and the sequence moves to the next item on the wall, left to right. Items already measured are not repeated.
+- **Typing.** **Type instead** stops the sequence and brings the keyboard back.
+
+**Measured opening sizes.** Each opening now has its own **Width** and **Height** boxes. When the measured size differs from the type by more than 2 mm:
+- **If only this opening uses the type,** the type is resized.
+- **If others use it,** a new type is made for this opening (for example `W1-2`, "… (measured size)"), and the other `W1` openings keep their size.
+
+Either way, the door/window schedule and the plaster and paint deductions use the measured size.
+
+**DXF elevations.** Export → **DXF elevations** draws every wall of every room as seen from inside, in mm, on these layers:
+
+| Layer | Contents |
+|---|---|
+| `ELEV_WALL` | wall outline and floor line |
+| `ELEV_OPENINGS` | openings with type and size |
+| `ELEV_POINTS` | electrical and plumbing points with their heights |
+| `ELEV_DIMS` | chain dimensions corner to corner, overall length and height, opening height and sill |
+| `ELEV_TEXT` | titles and labels |
+
+- **Layout.** Walls sit side by side, one row per room.
+- **Unplaced openings** are drawn at an assumed position and marked "(position assumed)".
+- **Format.** AutoCAD R12 DXF, like the plan export. Non-ASCII text, such as Gujarati room names, is written as `\U+XXXX` codes.
+
+**Tests:**
+- `t35` checks:
+  - the sequence order and focus;
+  - creating a new type versus resizing the existing one;
+  - moving to the next item;
+  - that the wall window's Save keeps the new type counts;
+  - the DXF structure.
+- The DXF was also read back with ezdxf: 0 audit errors.
+- Regression tests t7 and t17–t34 are unchanged (t7 `bw_main` = 14.3292).
+
 ## 4. Excel workbook
 
 | Sheet | Contents |
