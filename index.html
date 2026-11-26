@@ -744,10 +744,10 @@ function draw(){
   if(n){
     const sa=signedArea(r), outward=r.closed?(sa>0?-1:1):1;
     if(r.closed){ ctx.fillStyle='rgba(47,129,247,.07)'; ctx.beginPath(); q.forEach((p,i)=>{const s=W2S(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)}); ctx.closePath(); ctx.fill(); }
-    // wall thickness band on the outer side
-    for(let i=0;i<n;i++){ const w=r.walls[i], a=W2S(q[i]), b=W2S(q[i+1]), len=Math.hypot(b.x-a.x,b.y-a.y)||1, ux=(b.x-a.x)/len, uy=(b.y-a.y)/len, nx=-uy*outward, ny=ux*outward, t=tOf(w)*S.view.s;
+    // wall thickness band (side per Wall line; corners mitred)
+    { const B18=v18Bands(r,q); for(let i=0;i<n;i++){ const w=r.walls[i], pg=B18[i].poly.map(W2S);
       ctx.fillStyle=w.ext?'rgba(255,178,36,.20)':w.type==='part'?'rgba(219,229,242,.10)':'rgba(219,229,242,.18)';
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.lineTo(b.x+nx*t,b.y+ny*t); ctx.lineTo(a.x+nx*t,a.y+ny*t); ctx.closePath(); ctx.fill(); }
+      ctx.beginPath(); pg.forEach((p,k)=>k?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.closePath(); ctx.fill(); } }
     for(let i=0;i<n;i++){ const a=W2S(q[i]), b=W2S(q[i+1]), sel=i===S.sel; ctx.strokeStyle=sel?css('--sel'):css('--line'); ctx.lineWidth=sel?4:2.5; ctx.lineCap='round';
       ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
     if(r.closed){ const c=misclosure(r); if(c.d>0.002){ const a=W2S(q[n]),b=W2S(q[0]); ctx.strokeStyle=css('--bad'); ctx.lineWidth=2; ctx.setLineDash([6,5]); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.setLineDash([]); } }
@@ -1338,9 +1338,10 @@ function toDXF(with3D){
   const floors=[...new Set(P.rooms.map(r=>r.floor))]; let shift=0; const fdx={};
   for(const f of floors){ const rs=P.rooms.filter(r=>r.floor===f&&r.walls.length); if(!rs.length) continue; const b=bbox(rs.flatMap(pts)), dx=shift-b.minx; fdx[f]=dx;
     text('ROOMS',(b.minx+b.maxx)/2+dx,b.miny-1.2,300,'FLOOR '+f,0);
-    for(const r of rs){ const q=pts(r).map(p=>({x:p.x+dx,y:p.y})), n=r.walls.length, out=r.closed?(signedArea(r)>0?-1:1):1, th=120;
+    for(const r of rs){ const q=pts(r).map(p=>({x:p.x+dx,y:p.y})), n=r.walls.length, out=v18Sign(r), th=120, B18=v18Bands(r,q);
       if(with3D){ const z0=(floorLevels()[r.floor]||0), H=r.height; for(let i=0;i<n;i++){ const a=q[i],c=q[i+1]; g(0,'3DFACE');g(8,'WALLS3D');g(10,mm(a.x));g(20,mm(-a.y));g(30,mm(z0));g(11,mm(c.x));g(21,mm(-c.y));g(31,mm(z0));g(12,mm(c.x));g(22,mm(-c.y));g(32,mm(z0+H));g(13,mm(a.x));g(23,mm(-a.y));g(33,mm(z0+H)); } }
       for(let i=0;i<n;i++){ const a=q[i],c=q[i+1],w=r.walls[i]; g(0,'LINE');g(8,'WALLS');g(10,mm(a.x));g(20,mm(-a.y));g(30,0);g(11,mm(c.x));g(21,mm(-c.y));g(31,0);
+        { const rg=v18Range(r,w); for(const k of [0,1]) if(Math.abs(rg[k])>1e-6){ const [A,B]=B18[i]['f'+k]; g(0,'LINE');g(8,'WALLS');g(10,mm(A.x));g(20,mm(-A.y));g(30,0);g(11,mm(B.x));g(21,mm(-B.y));g(31,0); } }
         const ddx=c.x-a.x, ddy=c.y-a.y, len=Math.hypot(ddx,ddy)||1, nx=-ddy/len*out, ny=ddx/len*out; let ang=Math.atan2(-ddy,ddx)*180/Math.PI; if(ang>90) ang-=180; if(ang<-90) ang+=180;
         const o=tOf(w)+0.2; text('DIMS',(a.x+c.x)/2+nx*o,(a.y+c.y)/2+ny*o,th,(w.m?'':'~')+Math.round(w.L*1000),ang);
         const ops=(w.ops||[]).filter(x=>x.n).map(x=>x.code+(x.n>1?'x'+x.n:'')).join(' '); if(ops) text('OPENINGS',(a.x+c.x)/2-nx*0.25,(a.y+c.y)/2-ny*0.25,100,ops,ang); }
@@ -1357,9 +1358,9 @@ function toSVG(floor){
   const S0=1000/Math.max(b.maxx-b.minx,b.maxy-b.miny,0.5), pad=120, Wd=(b.maxx-b.minx)*S0+pad*2, Ht=(b.maxy-b.miny)*S0+pad*2+80;
   const X=x=>((x-b.minx)*S0+pad).toFixed(1), Y=y=>((y-b.miny)*S0+pad).toFixed(1);
   let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${Wd.toFixed(0)}" height="${Ht.toFixed(0)}" viewBox="0 0 ${Wd.toFixed(0)} ${Ht.toFixed(0)}" font-family="Georgia, 'Times New Roman', serif"><defs><pattern id="h" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#000" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="#fff"/>`;
-  for(const r of rs){ const q=pts(r), n=r.walls.length, out=r.closed?(signedArea(r)>0?-1:1):1;
-    for(let i=0;i<n;i++){ const a=q[i],c=q[i+1],w=r.walls[i],len=Math.hypot(c.x-a.x,c.y-a.y)||1,nx=-(c.y-a.y)/len*out,ny=(c.x-a.x)/len*out,t=tOf(w);
-      s+=`<polygon points="${X(a.x)},${Y(a.y)} ${X(c.x)},${Y(c.y)} ${X(c.x+nx*t)},${Y(c.y+ny*t)} ${X(a.x+nx*t)},${Y(a.y+ny*t)}" fill="url(#h)" stroke="#000" stroke-width="1.2"/>`;
+  for(const r of rs){ const q=pts(r), n=r.walls.length, out=v18Sign(r), B18=v18Bands(r,q);
+    for(let i=0;i<n;i++){ const a=q[i],c=q[i+1],w=r.walls[i],len=Math.hypot(c.x-a.x,c.y-a.y)||1,nx=-(c.y-a.y)/len*out,ny=(c.x-a.x)/len*out,t=Math.max(0,v18Range(r,w)[1]);
+      s+=`<polygon points="${B18[i].poly.map(p=>X(p.x)+','+Y(p.y)).join(' ')}" fill="url(#h)" stroke="#000" stroke-width="1.2"/>`;
       const o=t+40/S0; let ang=Math.atan2(c.y-a.y,c.x-a.x)*180/Math.PI; if(ang>90)ang-=180; if(ang<-90)ang+=180; const tx=(a.x+c.x)/2+nx*o, ty=(a.y+c.y)/2+ny*o;
       s+=`<text x="${X(tx)}" y="${Y(ty)}" font-size="20" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang.toFixed(2)} ${X(tx)} ${Y(ty)})">${esc((w.m?'':'≈ ')+fmt(w.L)+(w.lock?' 🔒':''))}</text>`;
       const ops=(w.ops||[]).filter(x=>x.n).map(x=>x.code+(x.n>1?'×'+x.n:'')).join(' '); if(ops){ const ix=(a.x+c.x)/2-nx*22/S0, iy=(a.y+c.y)/2-ny*22/S0; s+=`<text x="${X(ix)}" y="${Y(iy)}" font-size="16" font-style="italic" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang.toFixed(2)} ${X(ix)} ${Y(iy)})">${esc(ops)}</text>`; } }
@@ -1528,7 +1529,8 @@ function panelRoom(pb){
     <div class="field"><label for="rUse">Use (IS 3861 area category)</label><select id="rUse">${USES.map(([k,t])=>`<option value="${k}" ${k===(r.use||'hab')?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
     <div class="row">${lenField('rH','Height floor→ceiling',r.height)}</div>
     <p class="empty">Tip: tap a field with the green edge, then press measure on the laser to fill it.</p>
-    ${r.walls.length?'<div class="row"><button class="btn sm" id="rClr">Clear outline and redraw this room</button></div>':''}</div>
+    ${r.walls.length?'<div class="row"><button class="btn sm" id="rClr">Clear outline and redraw this room</button></div>':''}
+    ${r.walls.length?`<div class="field"><label>Wall line – which side the thickness is drawn (drawing only; quantities unchanged)</label><div class="row v18seg">${Object.keys(V18_LAB).map(k=>`<button class="btn sm${v18Mode(r)===k?' go':''}" data-wj="${k}">${k==='cl'?'CL (centre)':V18_LAB[k]}</button>`).join('')}</div></div>`:''}</div>
   <div class="grp"><h3>Works in this room</h3>
     <label class="toggle">Ceiling plaster & paint<input type="checkbox" id="rCeil" ${r.ceilPlaster?'checked':''}></label>
     <label class="toggle">RCC slab over this room<input type="checkbox" id="rSlab" ${r.slab?'checked':''}></label>
@@ -2787,7 +2789,7 @@ function lzRender(){ const el=$('lzBar'); if(!el||!P) return; const r=R(), i=S.s
     if(m&&m.kind==='sim') h+=`<div class="lzrow lzsim"><span class="lztag sim lzhide">SIMULATED</span><input id="lzSimVal" inputmode="decimal" placeholder="auto" value="${esc(LZ.sim.val)}" aria-label="Simulated reading"><select id="lzSimU" aria-label="Unit the simulated meter reports">${Object.keys(LZ_UNITS).map(u=>`<option ${u===LZ.sim.unit?'selected':''}>${u}</option>`).join('')}</select><button class="btn sm go" data-lz="press" ${LZ.state==='on'?'':'disabled'}>Press measure</button><button class="btn sm" data-lz="simoff" title="Drop the simulated link to test Reconnect">Drop</button></div>`;
     if((P.settings.lzRef||'rear')!=='rear') h+=`<div class="lzrow lzwarn">Meter reference: ${P.settings.lzRef==='front'?'front edge':'tripod thread'}. With the meter's back on the start wall the reading will be short by the distance from that reference to the rear edge. Set the rear edge on the meter (manual p.18).</div>`; }
   if(w){ h+=`<div class="lzrow"><b>W${i+1}</b><span class="lzlen">${fmt(w.L)}</span>${w.lock?'<span class="lzlock" title="Locked">🔒 locked</span>':w.m?'<span class="lzsmall">measured</span>':'<span class="lzsmall">estimate</span>'}
-      <span class="grow"></span>${w.lock?`<button class="btn sm go" data-lz="remeasure">Remeasure</button><button class="btn sm" data-lz="unlock">Unlock</button>`:`<button class="btn sm go" data-lz="laser">${armedHere?'Re-arm':'Laser'}</button>${w.m?'<button class="btn sm" data-lz="lock">Lock</button>':''}`}<button class="btn sm" data-lz="edit">Edit…</button></div>`;
+      <span class="grow"></span>${w.lock?`<button class="btn sm go" data-lz="remeasure">Remeasure</button><button class="btn sm" data-lz="unlock">Unlock</button>`:`<button class="btn sm go" data-lz="laser">${armedHere?'Re-arm':'Laser'}</button>${w.m?'<button class="btn sm" data-lz="lock">Lock</button>':''}`}<button class="btn sm" data-wj="next" title="Wall line: which side the thickness is drawn (drawing only)">Line: ${V18_LAB[v18Mode(R())]}</button><button class="btn sm" data-lz="edit">Edit…</button></div>`;
     h+=`<div class="lzrow lzmsg">${armedHere?`<span class="lzdot armed"></span><span><b>${A.label} armed${A.kind==='remeasure'?' (remeasure)':''}</b> — ${LZ.state==='on'?esc(lzRefShort()):'connect the meter, then press measure.'}</span>`:w.lock?'Locked length: it stays fixed when you reshape neighbouring walls. Remeasure or Unlock to change it.':LZ.session?'Tap Laser to arm this wall.':'Laser: measure this wall with a Bluetooth meter. Tap the wall again to type a length.'}</div>`; }
   else if(A&&(A.kind==='diag'||A.kind==='height')) h+=`<div class="lzrow lzmsg"><span class="lzdot armed"></span><span><b>${A.label} armed</b> — ${A.kind==='diag'?'meter on corner C1, aim at the opposite corner shown dashed':'meter flat on the floor (rear edge down), aim straight up at the ceiling'}.</span><span class="grow"></span><button class="btn sm" data-lz="skip">Skip</button></div>`;
   else if(LZ.session) h+=`<div class="lzrow lzmsg">${LZ.collect?'Collect mode: each reading goes to Unassigned. Assign them to walls afterwards.':'Tap a wall to arm it for the next reading.'}</div>`;
@@ -3066,8 +3068,9 @@ const v9Floor=()=>R().floor, v9Id=p=>p+uid();
 function v9Init(p){ p=p||P; if(!p) return; p.stairs=p.stairs||[]; p.slabs=p.slabs||[]; p.elx=p.elx||[]; p.v9=p.v9||{cond:3};
   for(const r of p.rooms) for(const w of r.walls) if(w.opPos&&!Array.isArray(w.opPos)) w.opPos=[]; }
 const isDoorK=op=>!!op&&/Door|Opening|Rolling|Gate|Shutter/i.test(op.kind);
-function wallG(r,i){ const q=pts(r), a=q[i], b=q[i+1], L=Math.hypot(b.x-a.x,b.y-a.y)||1e-9, ux=(b.x-a.x)/L, uy=(b.y-a.y)/L, o=r.closed?(signedArea(r)>0?-1:1):1;
-  return {a,b,L,ux,uy,nx:-uy*o,ny:ux*o,t:tOf(r.walls[i])}; }
+function wallG(r,i){ const q=pts(r), L=Math.hypot(q[i+1].x-q[i].x,q[i+1].y-q[i].y)||1e-9, ux=(q[i+1].x-q[i].x)/L, uy=(q[i+1].y-q[i].y)/L, o=v18Sign(r), t=tOf(r.walls[i]), d=v18Mode(r)==='cl'?-t/2:0;
+  const a=d?{x:q[i].x-uy*o*d,y:q[i].y+ux*o*d}:q[i], b=d?{x:q[i+1].x-uy*o*d,y:q[i+1].y+ux*o*d}:q[i+1];
+  return {a,b,L,ux,uy,nx:-uy*o,ny:ux*o,t}; }
 const floorRoomsAll=()=>P.rooms.map((r,ri)=>({r,ri})).filter(x=>x.r.floor===v9Floor()&&x.r.walls.length);
 /** Keep placed openings consistent with the wall's schedule counts and length. */
 function v9Fix(){ if(!P) return; v9Init(P);
@@ -4325,6 +4328,40 @@ function v17Over(){ if(!P) return; const f=v9Floor(), sc=S.view.s, d=S.dpr||1;
   void sc; }
 /** Tap on a marker → show its message. Returns true when a marker was hit. */
 function v17Tap(sx,sy){ if(!v17On()) return false; const f=v9Floor(); for(const c of v17ClashesCached()){ if(c.x==null||c.floor!==f) continue; const s=W2S({x:c.x,y:c.y}); if(Math.hypot(s.x-sx,s.y-sy)<16){ toast((c.lvl==='clash'?'Clash: ':'Check: ')+c.msg); V17.focus={t:performance.now(),ri:c.ri,wi:c.wi,walls:c.wi!=null?[c.wi]:[],x:c.x,y:c.y}; v17Tick(); return true; } } return false; }
+
+/* ===================== v18: wall line – centre line / left / right (drawing only) =====================
+   Per room, which way the wall thickness is drawn from the drawn (measured) line:
+     auto   – closed room: outside the room (the line is the inside face, as measured); open outline: to the left
+     cl     – centred on the line (half the thickness each side), e.g. when tracing a centre-line drawing
+     left   – to the left of the direction the outline was drawn (C1 → C2 → …)
+     right  – to the right of it
+   Corners are mitred: each face line runs to where it meets the neighbouring wall's same face, so bands join cleanly
+   instead of overlapping or leaving a notch. Quantities do not change – lengths, areas and the estimate still treat
+   the line as the measured face. Openings, points and door swings follow the band. */
+const V18_LAB={auto:'Auto',cl:'CL',left:'Left',right:'Right'};
+function v18Mode(r){ return (r&&V18_LAB[r.wj])?r.wj:'auto'; }
+/** +1: thickness on the left normal (−uy, ux); −1: on the right. */
+function v18Sign(r){ const m=v18Mode(r); if(m==='left') return 1; if(m==='right') return -1; return r.closed?(signedArea(r)>0?-1:1):1; }
+/** Offset range of the band from the line, along the band normal. */
+function v18Range(r,w){ const t=tOf(w); return v18Mode(r)==='cl'?[-t/2,t/2]:[0,t]; }
+/** Mitred band polygons for every wall of a room, in world coordinates: [{f0:[A,B], f1:[A,B], poly:[A0,B0,B1,A1]}]. */
+function v18Bands(r,q){ q=q||pts(r); const n=r.walls.length, s=v18Sign(r), out=[]; if(!n) return out;
+  const U=[], N=[], R=[]; for(let i=0;i<n;i++){ const a=q[i], b=q[i+1], L=Math.hypot(b.x-a.x,b.y-a.y)||1e-9, ux=(b.x-a.x)/L, uy=(b.y-a.y)/L; U.push({x:ux,y:uy}); N.push({x:-uy*s,y:ux*s}); R.push(v18Range(r,r.walls[i])); }
+  const line=(i,k)=>{ const d=R[i][k]; return {p:{x:q[i].x+N[i].x*d,y:q[i].y+N[i].y*d},u:U[i],d}; };
+  const meet=(A,B,v,lim)=>{ const cr=A.u.x*B.u.y-A.u.y*B.u.x; if(Math.abs(cr)<0.02) return null;
+    const t=((B.p.x-A.p.x)*B.u.y-(B.p.y-A.p.y)*B.u.x)/cr, X={x:A.p.x+A.u.x*t,y:A.p.y+A.u.y*t}; return Math.hypot(X.x-v.x,X.y-v.y)>lim?null:X; };
+  for(let i=0;i<n;i++){ const f=[];
+    for(const k of [0,1]){ const Li=line(i,k), lim=3*Math.max(Math.abs(R[i][0]),Math.abs(R[i][1]),0.05);
+      const hasPrev=r.closed||i>0, hasNext=r.closed||i<n-1, ip=(i-1+n)%n, inx=(i+1)%n;
+      const A=(hasPrev&&meet(Li,line(ip,k),q[i],lim))||{x:q[i].x+N[i].x*Li.d,y:q[i].y+N[i].y*Li.d};
+      const B=(hasNext&&meet(Li,line(inx,k),q[i+1],lim))||{x:q[i+1].x+N[i].x*Li.d,y:q[i+1].y+N[i].y*Li.d};
+      f.push([A,B]); }
+    out.push({f0:f[0],f1:f[1],poly:[f[0][0],f[0][1],f[1][1],f[1][0]]}); }
+  return out; }
+function v18Set(m){ const r=R(); if(!r) return; mutate(()=>{ if(m==='auto') delete r.wj; else r.wj=m; });
+  toast(`Wall line ${V18_LAB[m]}: ${m==='cl'?'thickness centred on the line':m==='auto'?(r.closed?'thickness outside the room (line = inside face)':'thickness to the left'):'thickness to the '+m+' of the drawing direction'}. Quantities unchanged.`); }
+function v18Next(r){ const k=Object.keys(V18_LAB); return k[(k.indexOf(v18Mode(r))+1)%k.length]; }
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-wj]'); if(!b) return; const r=R(); if(!r) return; v18Set(b.dataset.wj==='next'?v18Next(r):b.dataset.wj); });
 
 /* ===================== Wiring ===================== */
 document.addEventListener('click',e=>{ const q=e.target.closest&&e.target.closest('[data-qa]'); if(q){ const L=(qaChecks()[+q.dataset.qa]||[])[2]; if(L) v17Show(L); return; }

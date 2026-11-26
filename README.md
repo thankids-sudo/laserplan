@@ -619,6 +619,31 @@ The panel line shows "x/y rooms ready · n clashes".
   - the toggle hiding the markers.
 - The full suite t7, t17–t38 passes (`bw_main` 14.3292).
 
+## 3R. Version 18 (app 13.12): wall line – CL / Left / Right (drawing only)
+
+Each room has a **Wall line** setting that controls which side of the drawn line the wall thickness is shown:
+
+| Mode | Thickness drawn |
+|---|---|
+| **Auto** (default) | Closed room: outside the room, with the line as the measured inside face, as before. Open outline: to the left. |
+| **CL** | Centred on the line (half each side), for example when tracing a centre-line drawing. |
+| **Left / Right** | To the left or right of the direction the outline was drawn (C1 → C2 → …). |
+
+- **Where to set it.** Details → Room → *Wall line*, or the **Line:** button in the wall bar, which cycles Auto → CL → Left → Right.
+- **Mitred corners.** Each face runs to where it meets the neighbouring wall's same face, so bands no longer overlap or leave notches.
+- **Report and DXF.** The site-report plan uses the same mitred bands. The DXF now also draws the wall face lines on layer WALLS: the far face, or both faces with CL.
+- **Items on walls.** Openings, wall points and door swings follow the band.
+- **Quantities are unchanged.** Lengths, areas, the area statement and the estimate still treat the line as the measured face. Test `t39` checks that the quantity fingerprint is identical in all four modes.
+
+**Tests:**
+- `t39` covers:
+  - band offsets for every mode, the CL shift of openings and the 90° mitre;
+  - DXF face-line counts;
+  - the Room-tab buttons and the wall-bar cycle;
+  - the identical quantities.
+- The plan DXF was read back with ezdxf: 0 audit errors.
+- Full suite t7 and t17–t39 passes (`bw_main` 14.3292).
+
 ## 4. Excel workbook
 
 | Sheet | Contents |
