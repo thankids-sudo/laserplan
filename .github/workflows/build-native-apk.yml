@@ -17,10 +17,10 @@ on:
     inputs:
       version_name:
         description: "Version name (e.g. 13.0)"
-        default: "13.13"
+        default: "13.14"
       version_code:
         description: "Version code (must be higher than the installed app's; 12.0 was 1200)"
-        default: "1430"
+        default: "1440"
 
 permissions:
   contents: read
@@ -30,8 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      VERSION_NAME: ${{ github.event.inputs.version_name || '13.13' }}
-      VERSION_CODE: ${{ github.event.inputs.version_code || '1430' }}
+      VERSION_NAME: ${{ github.event.inputs.version_name || '13.14' }}
+      VERSION_CODE: ${{ github.event.inputs.version_code || '1440' }}
     steps:
       - uses: actions/checkout@v5
 
