@@ -256,6 +256,7 @@ label.chk{display:inline-flex;gap:5px;align-items:center;font-size:13px;margin-r
 table.v9t{width:100%;border-collapse:collapse;font-size:13px}table.v9t td,table.v9t th{border-bottom:1px solid var(--edge);padding:4px 6px;text-align:left}
 .v10tb{align-items:center;margin-bottom:6px}.v10tb select{height:34px;border-radius:8px;border:1px solid var(--edge);background:var(--paper);color:var(--ink);max-width:60%}
 .v10ed{border:1px solid var(--sel);border-radius:10px;padding:8px 10px;margin-top:6px}
+.qlT th,.qlT td{padding:3px 4px;text-align:left;font-size:13px}.qlT td:first-child{color:var(--muted)}
 input.lzcur{outline:3px solid #2f80ff;outline-offset:1px}input.lzok{border-color:#3ddc84!important}#v14Bar{align-items:center;gap:8px;flex-wrap:wrap}
 .v11gen .v11gi{display:flex;align-items:center;gap:6px}.v11gen .v11gi .toggle{flex:1}.v11p{width:70px;height:30px;border-radius:8px;border:1px solid var(--edge);background:var(--paper);color:var(--ink);padding:0 6px;font-family:var(--f-num)}
 .toast{pointer-events:none;bottom:max(calc(96px + env(safe-area-inset-bottom,0px)),var(--lzb,0px))!important}
@@ -1542,6 +1543,7 @@ function panelRoom(pb){
     <div class="grp">${(r.defects||[]).map((d,i)=>{ const df=defOf(d.type); return `<div class="oprow"><span><b style="color:var(--bad)">D${i+1}</b><small>${esc(df[1])} · ${df[2]==='m²'?`${d.n>1?d.n+' × ':''}${fmt(d.l)} × ${fmt(d.h)}`:df[2]==='m'?`${d.n>1?d.n+' × ':''}${fmt(d.l)}`:`${d.n} no`}${d.remark?' · '+esc(d.remark):''}</small></span><button class="btn sm" data-ed="${i}">Edit</button></div>`; }).join('')}
       ${(r.notes||[]).map((x,i)=>`<div class="oprow"><span><b style="color:#ffe28a">Note</b><small>${esc(x.text)}</small></span><button class="btn sm" data-en="${i}">Edit</button></div>`).join('')}
       ${(r.defects||[]).length||(r.notes||[]).length?'':'<p class="empty">None yet. Use Draw → Defect or Note to place them on the plan, or the buttons above.</p>'}</div></div>
+  <div class="grp"><h3>Measurement lists <span class="grow"></span><button class="btn sm" id="qlOpen">📋 Open</button></h3><p class="lzsmall">${qlSummary()}</p></div>
   <div class="grp"><h3>Site photos <span class="grow"></span><label class="btn sm" style="display:inline-flex;align-items:center;cursor:pointer">+ Photo<input type="file" id="rPhoto" accept="image/*" capture="environment" hidden></label></h3>
     <div class="opgrid" id="phGrid">${(r.photos||[]).map((p,i)=>`<button class="opcard" data-ph="${i}" style="padding:4px"><img alt="" data-pid="${p.id}" style="width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:7px;background:var(--panel)"><small>${esc(p.caption||'Photo '+(i+1))} · ${(p.marks||[]).length} arrows</small></button>`).join('')}</div>
     ${(r.photos||[]).length?'':'<p class="empty">Take photos of cracks, seepage or details and draw measured arrows on them.</p>'}</div>
@@ -4116,6 +4118,77 @@ function v14ElevDXF(){ const Lx=[], g=(c,v)=>Lx.push(String(c),String(v)), mm=v=
       oy-=top+3.0; } }
   finally{ V10.side=side; }
   g(0,'ENDSEC');g(0,'EOF'); return {dxf:Lx.join('\r\n'),walls,openings}; }
+
+/* ===================== v15: measurement lists =====================
+   Quick named lists of laser readings that are not part of a room plan – e.g. "Windows – Block A" with width × height
+   for every window, or "Pipe runs" with single lengths. Tap "📏 Laser: fill rows": every meter press fills the
+   highlighted cell and moves on; after the last cell of a row a new row starts. Values can be typed too.
+   Lists live in the project (P.lists), show totals (count, area for W × H, volume for W × H × D) and export as CSV
+   or plain text to share. */
+const QL={id:null,armed:false};
+const QL_PRESETS={wh:['Width','Height'],whd:['Width','Height','Depth'],l:['Length']};
+function qlLists(){ return P.lists=P.lists||[]; }
+function qlCur(){ const L=qlLists(); return L.find(x=>x.id===QL.id)||L[0]||null; }
+function qlSummary(){ const L=qlLists(); if(!L.length) return 'Quick lists of readings outside the plan, e.g. every window’s width × height.'; const n=L.reduce((s,x)=>s+x.rows.length,0); return `${L.length} list${L.length>1?'s':''}, ${n} row${n===1?'':'s'}.`; }
+function qlTotals(l){ const full=l.rows.filter(r=>r.v.length===l.cols.length&&r.v.every(v=>v>0)); let t=`${l.rows.length} row${l.rows.length===1?'':'s'}`;
+  if(l.cols.length===1) t+=` · total ${fmt(full.reduce((s,r)=>s+r.v[0],0))}`;
+  if(l.cols.length===2) t+=` · total area ${fmtArea(full.reduce((s,r)=>s+r.v[0]*r.v[1],0))}`;
+  if(l.cols.length===3) t+=` · total volume ${full.reduce((s,r)=>s+r.v[0]*r.v[1]*r.v[2],0).toFixed(3)} m³`;
+  const inc=l.rows.filter(r=>!full.includes(r)&&!qlEmpty(r)).length; t=t.replace(/^\d+ rows?/,()=>{ const n=l.rows.filter(r=>!qlEmpty(r)).length; return `${n} row${n===1?'':'s'}`; });
+  return t+(inc?` (${inc} incomplete row${inc>1?'s':''} not counted)`:'');
+  return t+(full.length<l.rows.length?` (${l.rows.length-full.length} incomplete row${l.rows.length-full.length>1?'s':''} not counted)`:''); }
+const qlEmpty=r=>!r.label&&!r.v.some(v=>v>0);
+function qlPrune(l){ if(l&&l.rows.some(qlEmpty)) mutate(()=>{ l.rows=l.rows.filter(r=>!qlEmpty(r)); }); }
+function qlCsv(l){ const q=s=>`"${String(s).replace(/"/g,'""')}"`; const head=['No','Label'].concat(l.cols.map(c=>c+' (m)'));
+  if(l.cols.length===2) head.push('Area (m²)'); if(l.cols.length===3) head.push('Volume (m³)');
+  const rows=l.rows.filter(r=>!qlEmpty(r)).map((r,k)=>{ const a=[k+1,q(r.label||'')].concat(l.cols.map((_,j)=>r.v[j]>0?r.v[j].toFixed(3):''));
+    if(l.cols.length>1){ const ok=r.v.length===l.cols.length&&r.v.every(v=>v>0); a.push(ok?r.v.reduce((s,v)=>s*v,1).toFixed(3):''); } return a.join(','); });
+  return [q(l.name)].concat([head.map(q).join(',')],rows).join('\r\n')+'\r\n'; }
+function qlText(l){ return `${l.name} (${P.name||'LaserPlan'})\n`+l.rows.filter(r=>!qlEmpty(r)).map((r,k)=>`${k+1}. ${r.label?r.label+': ':''}${l.cols.map((c,j)=>r.v[j]>0?fmt(r.v[j]):'—').join(' × ')}`).join('\n')+`\n${qlTotals(l)}`; }
+function openListsDialog(){
+  const L=qlLists(), l=qlCur(); QL.id=l?l.id:null;
+  dialog(`<h2>Measurement lists</h2>
+    <p class="lzsmall">For readings that are not part of a room plan. Tap a cell and press measure on the meter, or use <b>📏 Laser: fill rows</b> to go cell by cell.</p>
+    <div class="row"><select id="qlSel" style="flex:1">${L.map(x=>`<option value="${x.id}"${l&&x.id===l.id?' selected':''}>${esc(x.name)} (${x.rows.length})</option>`).join('')}${L.length?'':'<option value="">No lists yet</option>'}</select>
+      </div>
+    <div class="row"><input id="qlName" placeholder="New list name, e.g. Windows – Block A" style="flex:1"><select id="qlPre"><option value="wh">W × H</option><option value="whd">W × H × D</option><option value="l">Length</option></select><button class="btn sm" id="qlNew">+ New list</button></div>
+    <div id="qlBody"></div>
+    <div class="row"><button class="btn sm" id="qlCsv" ${l?'':'disabled'}>CSV</button><button class="btn sm" id="qlShare" ${l?'':'disabled'}>Share as text</button><button class="btn sm danger" id="qlDelL" ${l?'':'disabled'}>Delete list</button><span class="grow"></span><button class="btn pri" id="qlDone">Done</button></div>`,
+  ()=>{
+    $('qlSel').onchange=e=>{ QL.id=e.target.value; QL.armed=false; openListsDialog(); };
+    $('qlNew').onclick=()=>{ const cols=QL_PRESETS[$('qlPre').value]; const name=$('qlName').value.trim()||`${cols.length===1?'Lengths':'Items'} ${qlLists().length+1}`;
+      const nl={id:'ql'+uid(),name,cols:cols.slice(),rows:[]}; mutate(()=>{ qlLists().push(nl); }); QL.id=nl.id; QL.armed=false; openListsDialog(); };
+    $('qlDone').onclick=()=>{ QL.armed=false; qlPrune(qlCur()); closeDialog(); if(typeof render==='function') render(); };
+    if(!l) return;
+    $('qlCsv').onclick=()=>download(`${(P.name||'LaserPlan').replace(/[^\w.-]+/g,'_')}_${l.name.replace(/[^\w.-]+/g,'_')}.csv`,new Blob(['﻿'+qlCsv(l)],{type:'text/csv'}));
+    $('qlShare').onclick=async()=>{ const t=qlText(l); try{ if(navigator.share){ await navigator.share({title:l.name,text:t}); return; } }catch(e){ if(e&&e.name==='AbortError') return; }
+      try{ await navigator.clipboard.writeText(t); toast('List copied – paste it into WhatsApp or e-mail.'); }catch(e){ toast('Could not share or copy here.'); } };
+    $('qlDelL').onclick=()=>{ const b=$('qlDelL'); if(!b.dataset.sure){ b.dataset.sure='1'; b.textContent=`Tap again to delete ${l.rows.length} rows`; return; } mutate(()=>{ P.lists=qlLists().filter(x=>x!==l); }); QL.id=null; QL.armed=false; openListsDialog(); };
+    qlBody(l); });
+}
+function qlBody(l){ const b=$('qlBody'); if(!b) return;
+  b.innerHTML=`<div class="row"><b>${esc(l.name)}</b><span class="grow"></span><button class="btn sm go" id="qlArm">${QL.armed?'⏹ Stop laser fill':'📏 Laser: fill rows'}</button><button class="btn sm" id="qlAdd">+ Row</button></div>
+    <div style="overflow-x:auto"><table class="qlT" style="width:100%;border-collapse:collapse"><thead><tr><th>#</th><th>Label</th>${l.cols.map(c=>`<th>${esc(c)} (${P.unit})</th>`).join('')}<th></th></tr></thead><tbody>
+    ${l.rows.map((r,k)=>`<tr><td>${k+1}</td><td><input class="qlLab" data-r="${r.id}" value="${esc(r.label||'')}" placeholder="e.g. W-${k+1} bedroom" style="width:100%"></td>
+      ${l.cols.map((c,j)=>`<td><input id="qlc_${k}_${j}" class="qlV" data-r="${r.id}" data-j="${j}" data-laser inputmode="${QL.armed?'none':'decimal'}" value="${r.v[j]>0?toUnitNum(r.v[j]):''}" style="width:100%"></td>`).join('')}
+      <td><button class="btn sm danger" data-qldel="${r.id}">✕</button></td></tr>`).join('')}</tbody></table></div>
+    <p class="lzsmall" id="qlTot">${qlTotals(l)}</p>`;
+  // chain: every cell → next cell; the last cell of the last row adds a row
+  const cells=[...b.querySelectorAll('input.qlV')];
+  cells.forEach((e,k)=>{ e.dataset.lzstep=`${k+1}/${cells.length}`; if(k<cells.length-1) e.dataset.lznext=cells[k+1].id; else e.dataset.lzok='qlAdd'; });
+  for(const e of cells) e.onchange=()=>{ const r=l.rows.find(x=>x.id===e.dataset.r), j=+e.dataset.j, v=e.value.trim()===''?0:parseLen(e.value,P.unit);
+    if(e.value.trim()!==''&&!(v>0)){ toast('Enter a length like 1.200'); return; } mutate(()=>{ while(r.v.length<l.cols.length) r.v.push(0); r.v[j]=v||0; r.t=Date.now(); }); $('qlTot').textContent=qlTotals(l); };
+  for(const e of b.querySelectorAll('input.qlLab')) e.onchange=()=>{ const r=l.rows.find(x=>x.id===e.dataset.r); mutate(()=>{ r.label=e.value.trim(); }); };
+  for(const e of b.querySelectorAll('[data-qldel]')) e.onclick=()=>{ mutate(()=>{ l.rows=l.rows.filter(x=>x.id!==e.dataset.qldel); }); qlBody(l); };
+  $('qlAdd').onclick=()=>{ mutate(()=>{ l.rows.push({id:'r'+uid(),label:'',v:l.cols.map(()=>0),t:Date.now()}); }); qlBody(l); if(QL.armed) qlFocusNext(l); };
+  $('qlArm').onclick=()=>{ QL.armed=!QL.armed; if(!QL.armed){ qlPrune(l); qlBody(l); toast('Laser fill stopped.'); return; }
+    if(!l.rows.length||l.rows[l.rows.length-1].v.every(v=>v>0)) $('qlAdd').click(); else { qlBody(l); qlFocusNext(l); }
+    toast(`Laser fill on: press measure for ${l.cols.join(', then ')} of each item.`); };
+}
+/** Focuses the first empty cell (or the last cell), so the next reading lands there. */
+function qlFocusNext(l){ const cells=[...document.querySelectorAll('#qlBody input.qlV')]; const e=cells.find(x=>x.value==='')||cells[cells.length-1]; if(!e) return;
+  for(const x of cells) x.classList.remove('lzcur'); e.classList.add('lzcur'); e.focus(); }
+document.addEventListener('click',e=>{ if(e.target.closest&&e.target.closest('#qlOpen')) openListsDialog(); });
 
 /* ===================== Wiring ===================== */
 for(const b of document.querySelectorAll('.tool[data-mode]')) b.onclick=()=>setMode(b.dataset.mode);

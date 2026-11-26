@@ -535,6 +535,35 @@ Either way, the door/window schedule and the plaster and paint deductions use th
 - The DXF was also read back with ezdxf: 0 audit errors.
 - Regression tests t7 and t17–t34 are unchanged (t7 `bw_main` = 14.3292).
 
+## 3O. Version 15 (app 13.9): measurement lists
+
+These are for readings that are not part of a room plan, such as every window's width × height for a replacement tender, pipe-run lengths, or a set of door openings.
+
+**Where to find it.** The room panel → **Measurement lists → 📋 Open**. Type a name, choose **W × H**, **W × H × D** or **Length**, and tap **+ New list**.
+
+**Filling a list:**
+- **With the laser.** Tap **📏 Laser: fill rows**. Each press of the meter fills the highlighted cell and moves to the next one. After the last cell of a row a new row starts, so you can go window by window without touching the screen.
+- **By hand.** Tap any cell and measure, or type the value.
+- **Labels.** Each row has a label, for example "W-03 bedroom".
+
+**Totals and blank rows.** Totals are shown under the table: the count, plus the total length, area (W × H) or volume (W × H × D). Incomplete rows are listed but not counted. Blank rows are removed when you stop or close the list.
+
+**Sharing:**
+- **CSV** downloads the list with an area or volume column; it opens in Excel.
+- **Share as text** opens the phone's share sheet (WhatsApp, e-mail) or copies the list.
+
+Lists are saved in the project, so they are included in the project's backup, export and import.
+
+**Tests:**
+- `t36` covers:
+  - the laser fill order and moving to a new row;
+  - values and totals;
+  - the CSV and text;
+  - labels;
+  - persistence after a reload;
+  - the two-tap delete.
+- Regression tests t7, t17–t35 pass (`bw_main` 14.3292).
+
 ## 4. Excel workbook
 
 | Sheet | Contents |
