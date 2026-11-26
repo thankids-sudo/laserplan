@@ -77,6 +77,8 @@ class SurveyRecorder(
     @Volatile var finished = false
         private set
     private val startedAt = System.currentTimeMillis()
+    /** Every valid keyframe's points and colours as captured, so the cloud can be rebuilt with refined poses at Stop. */
+    private val frameClouds = ArrayList<Triple<Int, FloatArray, IntArray?>>()
 
     init {
         listOf("frames", "depth", "confidence", "rgb").forEach { File(dir, it).mkdirs() }
@@ -114,6 +116,7 @@ class SurveyRecorder(
             val cols = sampler?.let { sm -> IntArray(pts.size / 4) { i -> sm.colourAt(pts[i * 4], pts[i * 4 + 1], pts[i * 4 + 2]) } }
             cols?.let { c -> colouredPoints += c.count { it != VoxelGrid.NO_COLOUR } }
             grid.addAll(pts, cols)
+            frameClouds += Triple(n, pts, cols)
             updateLive(pts)
             points = grid.size
             validFrames.incrementAndGet()
@@ -161,13 +164,24 @@ class SurveyRecorder(
         live = liveRing.copyOf(liveCount * 3)
     }
 
-    /** Stop: wait for queued frames, then write cloud.xyzc, preview.bin and manifest.json. Blocking; call off the UI thread. */
-    fun finish(appVersion: String): JSONObject {
+    /**
+     * Stop: wait for queued frames, then write cloud.xyzc, cloud.ply, the viewer preview and manifest.json.
+     * With [anchors] (ARCore anchor poses read at Stop), the cloud is rebuilt with each keyframe moved by its
+     * drift correction; without usable anchors the cloud is kept as recorded. Blocking; call off the UI thread.
+     */
+    fun finish(appVersion: String, anchors: List<PoseRefinement.Obs>? = null): JSONObject {
         finished = true
         val f: Future<JSONObject> = io.submit<JSONObject> {
-            val cloud = grid.points()
-            val cols = grid.colours()
-            val keep = grid.keepMask()
+            val ref = anchors?.let { PoseRefinement.solve(it, frameClouds.map { fc -> fc.first }) }
+            val g = if (ref == null || ref.perFrame.isEmpty()) this.grid else rebuilt(ref)
+            ref?.let { r ->
+                File(dir, "poses_refined.json").writeText(JSONObject().put("summary", r.summary(frames.get()))
+                    .put("note", "Correction per keyframe in ARCore world: refined point = rotation(quaternion) · recorded point + translation. Frames not listed are uncorrected.")
+                    .put("corrections", r.perFrameJson()).toString(1))
+            }
+            val cloud = g.points()
+            val cols = g.colours()
+            val keep = g.keepMask()
             val kept = keep.count { it }
             File(dir, "cloud.xyzc").bufferedWriter().use { w ->
                 w.write("# LaserPlan AR survey processed cloud: x y z confidence\n")
@@ -176,9 +190,10 @@ class SurveyRecorder(
                     w.write(String.format(Locale.US, "%.4f %.4f %.4f %.3f\n", cloud[i * 4], cloud[i * 4 + 1], cloud[i * 4 + 2], cloud[i * 4 + 3]))
             }
             writePly(File(dir, "cloud.ply"), cloud, cols, keep, kept)
-            val (px, pc) = grid.sample(keep = keep)
+            val (px, pc) = g.sample(keep = keep)
             writePreview5(File(dir, PREVIEW5), px, pc)
-            val manifest = manifest(appVersion, kept).put("pointsBeforeStrayFilter", cloud.size / 4)
+            val manifest = manifest(appVersion, kept, g.dropped).put("pointsBeforeStrayFilter", cloud.size / 4)
+                .put("poseRefinement", ref?.summary(frames.get()) ?: JSONObject().put("method", "none (no anchors)"))
                 .put("colouredPoints", cols.indices.count { keep[it] && cols[it] != VoxelGrid.NO_COLOUR })
             File(dir, "manifest.json").writeText(manifest.toString(2))
             manifest
@@ -188,7 +203,21 @@ class SurveyRecorder(
         return m
     }
 
-    private fun manifest(appVersion: String, pointCount: Int): JSONObject = JSONObject().apply {
+    /** A new voxel grid from the stored keyframe points, each moved by its anchor correction (disk thread). */
+    private fun rebuilt(ref: PoseRefinement.Result): VoxelGrid {
+        val g = VoxelGrid()
+        for ((n, pts, cols) in frameClouds) {
+            val c = ref.perFrame[n]
+            val moved = if (c == null) pts else FloatArray(pts.size).also { o ->
+                var i = 0
+                while (i + 3 < pts.size) { c.apply(pts[i], pts[i + 1], pts[i + 2], o, i); o[i + 3] = pts[i + 3]; i += 4 }
+            }
+            g.addAll(moved, cols)
+        }
+        return g
+    }
+
+    private fun manifest(appVersion: String, pointCount: Int, dropped: Long): JSONObject = JSONObject().apply {
         put("schema", SCHEMA); put("version", VERSION)
         put("app", JSONObject().put("name", "LaserPlan").put("version", appVersion))
         put("device", device)
@@ -201,14 +230,15 @@ class SurveyRecorder(
         put("settings", SurveyConfig.toJson())
         put("depth", depthInfo)
         put("frameCount", frames.get()); put("validFrameCount", validFrames.get()); put("skippedBecauseBusy", skippedBusy.get())
-        put("pointCount", pointCount); put("pointsDroppedAtCap", grid.dropped)
+        put("pointCount", pointCount); put("pointsDroppedAtCap", dropped)
         put("processing", JSONObject()
             .put("method", "Per-pixel pinhole unprojection of ARCore raw depth with the pose of the camera frame the depth belongs to; reject 0 depth, confidence below minConfidence, range beyond maxRangeM, non-finite; voxel average; stray voxels with fewer than minNeighbours occupied neighbours removed (clouds of minPointsForFilter or more)")
             .put("colour", "Each point is projected into the RGB camera image of its keyframe (CPU image intrinsics and that image's own pose) and its colour sampled; voxel colour = average. Occlusion not checked.")
             .put("rawVsProcessed", "depth/ and confidence/ hold raw measurements; cloud.xyzc is processed and reduced"))
         put("accuracyNote", "Phone AR depth is estimate-grade (centimetres, worse at range and on plain or shiny surfaces). Not a survey-grade or LiDAR measurement. Confirm dimensions with the laser.")
         put("files", JSONObject().put("frames", "frames/NNNN.json").put("depth", "depth/NNNN.raw16le").put("confidence", "confidence/NNNN.raw8")
-            .put("rgb", "rgb/NNNN.jpg (selected keyframes)").put("cloud", "cloud.xyzc").put("cloudColour", "cloud.ply (ASCII PLY with colour)"))
+            .put("rgb", "rgb/NNNN.jpg (selected keyframes)").put("cloud", "cloud.xyzc").put("cloudColour", "cloud.ply (ASCII PLY with colour)")
+            .put("poseRefinement", "poses_refined.json (drift corrections; frames/NNNN.json keep the poses as recorded)"))
     }
 
     companion object {

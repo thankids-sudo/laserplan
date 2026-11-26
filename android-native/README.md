@@ -120,6 +120,35 @@ v13.5 widened the pose match to 8 ms (field data: depth stamps sit 1.9–2.0 ms 
 - **Viewer.** OpenGL viewer with round, depth-tested points in photo colour or height colour. Drag rotates, pinch zooms, double tap resets. There are **Points −/+** buttons and axis lines. Older scans open in height colour.
 - It is still a point cloud of measured points: no mesh, no gap filling. Mesh/TSDF surfaces come in a later step.
 
+### v13.7 – drift correction (from the 20 Nov living-room scan)
+
+**Field finding (scan s20261120-172435, S24 Ultra, 300 keyframes, 165 s).**
+- **Colour:** photo colour reached 99.2% of points.
+- **Depth noise:** a single depth frame is consistent to about 9 mm (local plane fit).
+- **Pose drift:** the same surface seen at different moments disagreed by a median of 32 mm (90th percentile 70 mm). That disagreement is what makes the walls thick and doubled.
+- **Worst stretch:** error was highest in the first ~50 keyframes, at 59 mm against 12–28 mm later.
+- **Speed:** error did not depend on turning speed (correlation 0.00), so depth/pose timing is not the cause.
+
+These offline trials did not help and were not shipped:
+- stricter confidence, a range cap and edge filtering (all stayed at 31–32 mm);
+- keeping only voxels seen by several frames (64% of points lost, same thickness);
+- simple frame-to-model ICP on 160×90 depth (28–42 mm, unreliable).
+
+**Fix: ARCore anchors.**
+- An anchor is placed at the camera pose of every 4th keyframe.
+- ARCore keeps improving anchor poses as its map improves, so at Stop each anchor's change (pose now × pose when placed⁻¹) is read on the GL thread.
+- Each keyframe gets the correction interpolated between its nearest anchors (translation linear, rotation slerp), and the cloud is rebuilt from the stored keyframe points.
+- An anchor is not used if it is no longer tracked or moved more than 0.5 m or 10°.
+- `poses_refined.json` lists every correction. `frames/NNNN.json` keep the poses as recorded, so both versions can be compared offline.
+- The manifest has a `poseRefinement` summary, and the viewer shows it.
+- *How much this improves walls is not yet measured; it needs the next field scan.*
+
+**Other changes:**
+- Max keyframes raised from 300 to 400. The 20 Nov scan hit the 300 limit after 165 s.
+- Viewer: **Walls only** hides the floor and ceiling layers (2nd–98th height percentile minus 0.20 m), and **Top view** looks straight down. Together they show a plan-like view of the scan.
+- The start message asks for a few seconds of slow panning first.
+- CI actions updated to v5 (setup-java v4 was deprecated).
+
 ## Universal Laser Connectivity Engine (ULCE)
 
 ```
