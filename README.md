@@ -598,6 +598,27 @@ The panel line shows "x/y rooms ready · n clashes".
   - the segment test.
 - Regression tests t7 and t17–t36 pass (`bw_main` 14.3292).
 
+## 3Q. Version 17 (app 13.11): checks highlighted on the drawing
+
+- **Tap a line in Checks** (Details → Estimate):
+  - the sheet closes on a phone, the room is selected and the plan is centred on the problem;
+  - for about 6 s the walls concerned glow orange (e.g. every unmeasured wall, or the wall whose openings are too wide) and a red ring pulses on the exact point of a clash;
+  - lines that can be shown carry a 📍.
+- **Markers on the plan.**
+  - Every clash on the current floor shows a red **!** and every point to confirm an amber **?**.
+  - Tapping a marker shows its message and highlights it, without selecting what lies underneath.
+  - **On plan: on/off** in the Checks card hides or shows the markers; the setting is saved with the project.
+- **Locations.** Each clash now carries a plan position: the overlap centre, the point, between the two door leaves, the furniture item, between the electrical and plumbing points, or the doorway centre. Room checks are located at the room or its walls.
+- **Fix: drawing back in view.** After **Apply** in the wall elevation (outside the laser sequence), the drawing scrolls back into view. Since v13.8 the taller editor left it scrolled off the top on phones; test `t26` caught this.
+
+**Tests:**
+- `t38` runs on a 412 px phone viewport and covers:
+  - markers drawn and every clash located;
+  - lines tappable, the sheet closing, focus and centring for walls and for a clash point;
+  - a marker tap showing its message;
+  - the toggle hiding the markers.
+- The full suite t7, t17–t38 passes (`bw_main` 14.3292).
+
 ## 4. Excel workbook
 
 | Sheet | Contents |
