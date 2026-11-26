@@ -256,7 +256,11 @@ label.chk{display:inline-flex;gap:5px;align-items:center;font-size:13px;margin-r
 table.v9t{width:100%;border-collapse:collapse;font-size:13px}table.v9t td,table.v9t th{border-bottom:1px solid var(--edge);padding:4px 6px;text-align:left}
 .v10tb{align-items:center;margin-bottom:6px}.v10tb select{height:34px;border-radius:8px;border:1px solid var(--edge);background:var(--paper);color:var(--ink);max-width:60%}
 .v10ed{border:1px solid var(--sel);border-radius:10px;padding:8px 10px;margin-top:6px}
-.qlT th,.qlT td{padding:3px 4px;text-align:left;font-size:13px}.qlT td:first-child{color:var(--muted)}
+.qlT th,.qlT td{padding:3px 4px;text-align:left;font-size:13px}
+.v16top{display:flex;gap:14px;flex-wrap:wrap;justify-content:space-around;margin:6px 0}.v16ring{display:flex;flex-direction:column;align-items:center;gap:2px}.v16ring small{color:var(--muted)}
+.v16kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:8px 0}.v16kpi div{border:1px solid var(--line);border-radius:10px;padding:6px 8px;display:flex;flex-direction:column}.v16kpi small{color:var(--muted)}
+.v16t{width:100%;border-collapse:collapse;font-size:13px}.v16t th,.v16t td{padding:4px 5px;text-align:left;border-bottom:1px solid var(--line)}.v16t tr[data-v16r]{cursor:pointer}
+.v16bar{display:inline-block;width:46px;height:6px;border-radius:3px;background:var(--line);margin-right:5px;vertical-align:middle;overflow:hidden}.v16bar i{display:block;height:100%;background:#3ddc84}.v16c{cursor:pointer}.qlT td:first-child{color:var(--muted)}
 input.lzcur{outline:3px solid #2f80ff;outline-offset:1px}input.lzok{border-color:#3ddc84!important}#v14Bar{align-items:center;gap:8px;flex-wrap:wrap}
 .v11gen .v11gi{display:flex;align-items:center;gap:6px}.v11gen .v11gi .toggle{flex:1}.v11p{width:70px;height:30px;border-radius:8px;border:1px solid var(--edge);background:var(--paper);color:var(--ink);padding:0 6px;font-family:var(--f-num)}
 .toast{pointer-events:none;bottom:max(calc(96px + env(safe-area-inset-bottom,0px)),var(--lzb,0px))!important}
@@ -701,6 +705,7 @@ function qaChecks(){
   }
   if(!anyExt&&P.rooms.some(r=>r.walls.length)) out.push(['warn','No wall is marked External: external plaster, painting and parapet will be zero']);
   const items=estimate(), nr=items.filter(it=>!(+P.rates[it.key]>0)).length; if(nr) out.push(['info',`${nr} of ${items.length} items have no rate yet`]);
+  try{ for(const c of v16Clashes()) out.push([c.lvl==='clash'?'warn':'info',(c.lvl==='clash'?'Clash: ':'Check: ')+c.msg]); }catch(e){}
   return out;
 }
 const rowQty=rw=>rw.no*(rw.l??1)*(rw.b??1)*(rw.h??1);
@@ -1543,6 +1548,7 @@ function panelRoom(pb){
     <div class="grp">${(r.defects||[]).map((d,i)=>{ const df=defOf(d.type); return `<div class="oprow"><span><b style="color:var(--bad)">D${i+1}</b><small>${esc(df[1])} · ${df[2]==='m²'?`${d.n>1?d.n+' × ':''}${fmt(d.l)} × ${fmt(d.h)}`:df[2]==='m'?`${d.n>1?d.n+' × ':''}${fmt(d.l)}`:`${d.n} no`}${d.remark?' · '+esc(d.remark):''}</small></span><button class="btn sm" data-ed="${i}">Edit</button></div>`; }).join('')}
       ${(r.notes||[]).map((x,i)=>`<div class="oprow"><span><b style="color:#ffe28a">Note</b><small>${esc(x.text)}</small></span><button class="btn sm" data-en="${i}">Edit</button></div>`).join('')}
       ${(r.defects||[]).length||(r.notes||[]).length?'':'<p class="empty">None yet. Use Draw → Defect or Note to place them on the plan, or the buttons above.</p>'}</div></div>
+  <div class="grp"><h3>Project status <span class="grow"></span><button class="btn sm" id="v16Open">📊 Open</button></h3><p class="lzsmall">${v16Summary()}</p></div>
   <div class="grp"><h3>Measurement lists <span class="grow"></span><button class="btn sm" id="qlOpen">📋 Open</button></h3><p class="lzsmall">${qlSummary()}</p></div>
   <div class="grp"><h3>Site photos <span class="grow"></span><label class="btn sm" style="display:inline-flex;align-items:center;cursor:pointer">+ Photo<input type="file" id="rPhoto" accept="image/*" capture="environment" hidden></label></h3>
     <div class="opgrid" id="phGrid">${(r.photos||[]).map((p,i)=>`<button class="opcard" data-ph="${i}" style="padding:4px"><img alt="" data-pid="${p.id}" style="width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:7px;background:var(--panel)"><small>${esc(p.caption||'Photo '+(i+1))} · ${(p.marks||[]).length} arrows</small></button>`).join('')}</div>
@@ -4158,7 +4164,7 @@ function openListsDialog(){
     $('qlSel').onchange=e=>{ QL.id=e.target.value; QL.armed=false; openListsDialog(); };
     $('qlNew').onclick=()=>{ const cols=QL_PRESETS[$('qlPre').value]; const name=$('qlName').value.trim()||`${cols.length===1?'Lengths':'Items'} ${qlLists().length+1}`;
       const nl={id:'ql'+uid(),name,cols:cols.slice(),rows:[]}; mutate(()=>{ qlLists().push(nl); }); QL.id=nl.id; QL.armed=false; openListsDialog(); };
-    $('qlDone').onclick=()=>{ QL.armed=false; qlPrune(qlCur()); closeDialog(); if(typeof render==='function') render(); };
+    $('qlDone').onclick=()=>{ QL.armed=false; qlPrune(qlCur()); closeDialog(); afterChange(); };
     if(!l) return;
     $('qlCsv').onclick=()=>download(`${(P.name||'LaserPlan').replace(/[^\w.-]+/g,'_')}_${l.name.replace(/[^\w.-]+/g,'_')}.csv`,new Blob(['﻿'+qlCsv(l)],{type:'text/csv'}));
     $('qlShare').onclick=async()=>{ const t=qlText(l); try{ if(navigator.share){ await navigator.share({title:l.name,text:t}); return; } }catch(e){ if(e&&e.name==='AbortError') return; }
@@ -4189,6 +4195,91 @@ function qlBody(l){ const b=$('qlBody'); if(!b) return;
 function qlFocusNext(l){ const cells=[...document.querySelectorAll('#qlBody input.qlV')]; const e=cells.find(x=>x.value==='')||cells[cells.length-1]; if(!e) return;
   for(const x of cells) x.classList.remove('lzcur'); e.classList.add('lzcur'); e.focus(); }
 document.addEventListener('click',e=>{ if(e.target.closest&&e.target.closest('#qlOpen')) openListsDialog(); });
+
+/* ===================== v16: clash checks + project status dashboard =====================
+   Clash checks look at what was measured and placed – like a BIM clash test, scaled to a renovation survey:
+     clash  two placed doors/windows overlap on the same wall
+     clash  a wall point (switch board, socket, tap…) lies inside a placed door/window opening
+     clash  a door leaf's swing hits another door's swing
+     clash  a door leaf's swing hits a furniture item (items mounted above the door head are ignored)
+     check  an electrical point is within 0.30 m (in plan) of a plumbing point – confirm it is meant to be there
+     check  a pipe route passes through a doorway – confirm it runs below the floor or above the door
+   Only placed items are checked; unplaced openings have no known position. Results also go into Checks
+   (Excel and site report). The status dashboard summarises, per room, what has been measured and what is left. */
+const V16={clashTol:0.01, elPlGap:0.30};
+function v16DoorPoly(r,i,o,op){ const g=wallG(r,i), hs=o.hinge==='b'?o.off+op.w:o.off, toO=o.hinge==='b'?-1:1, base=o.swing==='out'?g.t:0, dir=o.swing==='out'?1:-1;
+  const H={x:g.a.x+g.ux*hs+g.nx*base,y:g.a.y+g.uy*hs+g.ny*base}, R0=op.w, pts=[H];
+  for(let k=0;k<=8;k++){ const t=k/8*Math.PI/2, cu=Math.cos(t)*toO, cn=Math.sin(t)*dir; pts.push({x:H.x+(g.ux*cu+g.nx*cn)*R0,y:H.y+(g.uy*cu+g.ny*cn)*R0}); }
+  return pts; }
+function v16FuPoly(e){ const g=fuGeo(e), w=e.w/2, d=Math.max(e.d,0.05)/2; return [g.P(-w,-d),g.P(w,-d),g.P(w,d),g.P(-w,d)]; }
+/** Convex polygons overlap by more than a sliver (separating-axis test with a small inset). */
+function v16Hit(A,B,inset){ const m=inset||0.02;
+  for(const Q of [A,B]) for(let k=0;k<Q.length;k++){ const a=Q[k], b=Q[(k+1)%Q.length], ex=b.x-a.x, ey=b.y-a.y, L=Math.hypot(ex,ey); if(L<1e-9) continue; const nx=-ey/L, ny=ex/L;
+    let a0=Infinity,a1=-Infinity,b0=Infinity,b1=-Infinity; for(const p of A){ const v=p.x*nx+p.y*ny; a0=Math.min(a0,v); a1=Math.max(a1,v); } for(const p of B){ const v=p.x*nx+p.y*ny; b0=Math.min(b0,v); b1=Math.max(b1,v); }
+    if(a1<b0+m||b1<a0+m) return false; }
+  return true; }
+function v16SegX(p1,p2,p3,p4){ const d=(p2.x-p1.x)*(p4.y-p3.y)-(p2.y-p1.y)*(p4.x-p3.x); if(Math.abs(d)<1e-12) return false;
+  const t=((p3.x-p1.x)*(p4.y-p3.y)-(p3.y-p1.y)*(p4.x-p3.x))/d, u=((p3.x-p1.x)*(p2.y-p1.y)-(p3.y-p1.y)*(p2.x-p1.x))/d; return t>0.001&&t<0.999&&u>0.001&&u<0.999; }
+/** All clashes in the project: [{lvl:'clash'|'check', msg, ri, wi}] */
+function v16Clashes(){ const out=[], add=(lvl,msg,ri,wi)=>out.push({lvl,msg,ri,wi});
+  const doors=[];
+  P.rooms.forEach((r,ri)=>{ const rn=`${r.floor} ${r.name}`; if(!r.walls.length) return;
+    r.walls.forEach((w,i)=>{ const pl=(w.opPos||[]).map(o=>({o,op:opOf(o.code)})).filter(x=>x.op);
+      for(let a=0;a<pl.length;a++) for(let b=a+1;b<pl.length;b++){ const A=pl[a], B=pl[b], ov=Math.min(A.o.off+A.op.w,B.o.off+B.op.w)-Math.max(A.o.off,B.o.off);
+        if(ov>V16.clashTol) add('clash',`${rn} W${i+1}: ${A.o.code} and ${B.o.code} overlap by ${Math.round(ov*1000)} mm`,ri,i); }
+      const pts=(P.elx||[]).filter(e=>e.ref&&e.ref.rid===r.id&&e.ref.wi===i).map(e=>({e,t:'el',nm:elx(e.k)[1]})).concat((P.plx||[]).filter(e=>e.ref&&e.ref.rid===r.id&&e.ref.wi===i).map(e=>({e,t:'pl',nm:plx(e.k)[1]})));
+      for(const q of pts) for(const x of pl){ const s=q.e.ref.s, h=q.e.h||0, sill=v10Sill(x.o,x.op);
+        if(s>x.o.off+V16.clashTol&&s<x.o.off+x.op.w-V16.clashTol&&h>sill+V16.clashTol&&h<sill+x.op.h-V16.clashTol) add('clash',`${rn} W${i+1}: ${q.e.label||q.nm} is inside the ${x.o.code} opening`,ri,i); }
+      for(const x of pl) if(isDoorK(x.op)) doors.push({r,ri,i,o:x.o,op:x.op,poly:v16DoorPoly(r,i,x.o,x.op),rn}); }); });
+  for(let a=0;a<doors.length;a++) for(let b=a+1;b<doors.length;b++){ const A=doors[a], B=doors[b]; if(A.r.floor!==B.r.floor) continue;
+    if(Math.hypot(A.poly[0].x-B.poly[0].x,A.poly[0].y-B.poly[0].y)<0.3&&Math.abs(A.op.w-B.op.w)<0.02&&A.r!==B.r) continue; // same door entered from both rooms
+    if(v16Hit(A.poly,B.poly)) add('clash',`${A.rn}: swing of ${A.o.code} (W${A.i+1}) hits the swing of ${B.o.code} (${B.r===A.r?'':B.r.name+' '}W${B.i+1})`,A.ri,A.i); }
+  for(const D of doors) for(const e of (P.fur||[])){ if(e.floor!==D.r.floor||(e.z||0)>=D.op.h) continue;
+    if(v16Hit(D.poly,v16FuPoly(e))) add('clash',`${D.rn}: swing of ${D.o.code} (W${D.i+1}) hits ${e.label||fux(e.k)[1]}`,D.ri,D.i); }
+  const rIdx=id=>P.rooms.findIndex(r=>r.id===id);
+  for(const e of (P.elx||[])) for(const p of (P.plx||[])){ if(e.floor!==p.floor||elx(e.k)[3]!=='wall') continue; const d=Math.hypot(e.x-p.x,e.y-p.y);
+    if(d<V16.elPlGap){ const ri=e.ref?rIdx(e.ref.rid):-1; add('check',`${e.floor} ${ri>=0?P.rooms[ri].name+': ':''}${e.label||elx(e.k)[1]} is ${Math.round(d*1000)} mm from ${p.label||plx(p.k)[1]} – confirm the electrical point is meant to be next to water`,ri,e.ref?e.ref.wi:null); } }
+  const floors=[...new Set(P.rooms.map(r=>r.floor))];
+  for(const f of floors){ let net=null; try{ net=v11Nets(f); }catch(e){ net=null; } if(!net) continue;
+    for(const run of net.sRuns.concat(net.dRuns)){ if(!run.a||!run.b) continue;
+      for(const D of doors){ if(D.r.floor!==f) continue; const g=wallG(D.r,D.i), p1={x:g.a.x+g.ux*D.o.off,y:g.a.y+g.uy*D.o.off}, p2={x:g.a.x+g.ux*(D.o.off+D.op.w),y:g.a.y+g.uy*(D.o.off+D.op.w)};
+        if(v16SegX(run.a,run.b,p1,p2)) add('check',`${D.rn} W${D.i+1}: a pipe route (${run.a.label||plx(run.a.k)[1]} – ${run.b.label||plx(run.b.k)[1]}) passes through doorway ${D.o.code} – confirm it runs below the floor or above the door`,D.ri,D.i); } } }
+  const seen=new Set(); return out.filter(x=>!seen.has(x.msg)&&seen.add(x.msg)); }
+
+/* ---------- status dashboard ---------- */
+function v16RoomStatus(r){ const walls=r.walls.length, meas=r.walls.filter(w=>w.m).length, tol=(P.settings.tolMm||20)/1000;
+  const mc=r.closed&&walls&&meas===walls?misclosure(r).d:null;
+  let opT=0, opP=0; for(const w of r.walls){ opT+=(w.ops||[]).reduce((s,o)=>s+(o.n||0),0); opP+=(w.opPos||[]).length; }
+  const need=r.closed&&walls>=4?walls-3:0, dg=Object.values(r.diags||{}).filter(v=>v>0).length;
+  const el=(P.elx||[]).filter(e=>e.ref&&e.ref.rid===r.id).length, pl=(P.plx||[]).filter(e=>e.ref&&e.ref.rid===r.id).length;
+  const issues=[]; if(!walls) issues.push('no outline'); else { if(!r.closed) issues.push('outline open'); if(meas<walls) issues.push(`${walls-meas} wall${walls-meas>1?'s':''} to measure`);
+    if(mc!=null&&mc>tol) issues.push(`closure ${Math.round(mc*1000)} mm`); if(dg<need) issues.push(`${need-dg} diagonal${need-dg>1?'s':''}`); if(opP<opT) issues.push(`${opT-opP} opening${opT-opP>1?'s':''} to place`); }
+  return {walls,meas,mc,opT,opP,need,dg,el,pl,def:(r.defects||[]).length,ph:(r.photos||[]).length,sc:(r.scans||[]).length,issues}; }
+function v16Ring(pct,lbl,col){ const R=26, C=2*Math.PI*R, p=Math.max(0,Math.min(1,pct));
+  return `<div class="v16ring"><svg viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="${lbl} ${Math.round(p*100)}%"><circle cx="32" cy="32" r="${R}" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="32" cy="32" r="${R}" fill="none" stroke="${col}" stroke-width="7" stroke-dasharray="${(C*p).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 32 32)" stroke-linecap="round"/><text x="32" y="36" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">${Math.round(p*100)}%</text></svg><small>${lbl}</small></div>`; }
+function openStatusDialog(){
+  const rows=P.rooms.map((r,ri)=>({r,ri,s:v16RoomStatus(r)})), T=rows.reduce((a,x)=>{ for(const k of ['walls','meas','opT','opP','need','dg','def','ph','sc','el','pl']) a[k]=(a[k]||0)+x.s[k]; return a; },{});
+  const cl=v16Clashes(), nClash=cl.filter(x=>x.lvl==='clash').length, nCheck=cl.length-nClash;
+  const items=estimate(); let sub=0, noRate=0; for(const it of items){ const rt=+P.rates[it.key]||0; if(!rt) noRate++; sub+=it.qty*rt; } const grand=addonTotals(sub).grand;
+  const ready=rows.filter(x=>x.r.walls.length&&!x.s.issues.length).length;
+  const floors=[...new Set(P.rooms.map(r=>r.floor))];
+  dialog(`<h2>Project status</h2>
+    <div class="v16top">${v16Ring(T.walls?T.meas/T.walls:0,'walls measured','#3ddc84')}${v16Ring(T.opT?T.opP/T.opT:1,'openings placed','#2f80ff')}${v16Ring(T.need?Math.min(1,T.dg/T.need):1,'diagonals','#f5b841')}${v16Ring(P.rooms.length?ready/P.rooms.length:0,'rooms ready','#b07cff')}</div>
+    <div class="v16kpi"><div><b>${inr(grand)}</b><small>estimate${noRate?` · ${noRate} item${noRate>1?'s':''} without rate`:''}</small></div><div><b style="color:${nClash?'var(--bad)':'inherit'}">${nClash}</b><small>clash${nClash===1?'':'es'}</small></div><div><b>${nCheck}</b><small>to check</small></div><div><b>${T.def}</b><small>defects</small></div><div><b>${T.ph}</b><small>photos</small></div><div><b>${T.sc}</b><small>3D scans</small></div></div>
+    ${floors.map(f=>`<h3>${esc(f)}</h3><div style="overflow-x:auto"><table class="v16t"><tr><th>Room</th><th>Walls</th><th>Closure</th><th>Openings</th><th>Points</th><th>Defects</th><th>Photos / 3D</th><th>Left to do</th></tr>
+      ${rows.filter(x=>x.r.floor===f).map(({r,ri,s})=>`<tr data-v16r="${ri}"><td><b>${esc(r.name)}</b></td><td><span class="v16bar"><i style="width:${s.walls?Math.round(100*s.meas/s.walls):0}%"></i></span>${s.meas}/${s.walls}</td>
+        <td>${s.mc==null?'–':`<span style="color:${s.mc>(P.settings.tolMm||20)/1000?'var(--bad)':'inherit'}">${Math.round(s.mc*1000)} mm</span>`}</td><td>${s.opP}/${s.opT}</td><td>${s.el+s.pl}</td><td>${s.def}</td><td>${s.ph} / ${s.sc}</td>
+        <td>${s.issues.length?`<small>${esc(s.issues.join(' · '))}</small>`:'<b style="color:#3ddc84">✓ ready</b>'}</td></tr>`).join('')}</table></div>`).join('')}
+    <h3>Clash checks</h3><div id="v16Cl">${cl.length?cl.map((x,k)=>`<div class="oprow v16c" data-v16c="${k}"><span><b style="color:${x.lvl==='clash'?'var(--bad)':'#f5b841'}">${x.lvl==='clash'?'Clash':'Check'}</b> <small>${esc(x.msg)}</small></span>${x.ri>=0?'<button class="btn sm">Go</button>':''}</div>`).join(''):'<p class="empty">No clashes between placed openings, points, door swings, furniture and pipe routes.</p>'}</div>
+    <p class="lzsmall">Only placed items are checked. Clashes and checks are also listed under Checks in the Excel workbook and site report.</p>
+    <div class="row"><span class="grow"></span><button class="btn pri" id="v16Done">Done</button></div>`,
+  ()=>{ $('v16Done').onclick=()=>{ closeDialog(); afterChange(); };
+    const go=(ri,wi)=>{ if(!(ri>=0)) return; P.cur=ri; S.sel=-1; closeDialog(); afterChange(); if(wi!=null&&typeof openWallDialog==='function') openWallDialog(wi); };
+    for(const e of document.querySelectorAll('[data-v16r]')) e.onclick=()=>go(+e.dataset.v16r,null);
+    for(const e of document.querySelectorAll('[data-v16c]')) e.onclick=()=>{ const x=cl[+e.dataset.v16c]; go(x.ri,x.wi); }; }); }
+function v16Summary(){ const cl=v16Clashes(), n=cl.filter(x=>x.lvl==='clash').length, rows=P.rooms.filter(r=>r.walls.length), ready=rows.filter(r=>!v16RoomStatus(r).issues.length).length;
+  return `${ready}/${P.rooms.length} rooms ready · ${n} clash${n===1?'':'es'}${cl.length-n?` · ${cl.length-n} to check`:''}`; }
+document.addEventListener('click',e=>{ if(e.target.closest&&e.target.closest('#v16Open')) openStatusDialog(); });
 
 /* ===================== Wiring ===================== */
 for(const b of document.querySelectorAll('.tool[data-mode]')) b.onclick=()=>setMode(b.dataset.mode);

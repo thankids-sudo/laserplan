@@ -564,6 +564,40 @@ Lists are saved in the project, so they are included in the project's backup, ex
   - the two-tap delete.
 - Regression tests t7, t17–t35 pass (`bw_main` 14.3292).
 
+## 3P. Version 16 (app 13.10): clash checks and project status dashboard
+
+These ideas are adapted from BIM coordination (clash detection, model checks, status dashboards) for surveys of existing buildings.
+
+**Clash checks.** These run on placed items only; openings that are not placed have no known position.
+
+| Level | Rule |
+|---|---|
+| Clash | Two doors or windows overlap on the same wall (by more than 10 mm). |
+| Clash | A wall point (switch board, socket, tap…) lies inside a placed opening: within its width and between sill and head. |
+| Clash | A door leaf's swing (quarter circle from the hinge, in or out) hits another door's swing on the same floor. The same door entered from both rooms is not counted. |
+| Clash | A door's swing hits a furniture item's footprint. Items whose bottom is at or above the door head are ignored. |
+| Check | An electrical wall point is within 0.30 m (in plan) of a plumbing point. Confirm it is meant to be next to water. |
+| Check | A pipe route passes through a doorway. Confirm it runs below the floor or above the door. |
+
+Clashes and checks also appear in **Checks**, so they reach the Excel workbook and the site report.
+
+**Project status.** Room panel → **Project status → 📊 Open**. It shows:
+- **Rings:** walls laser-measured, openings placed, diagonals measured, and rooms ready.
+- **Tiles:** the estimate total with items still without rates, clashes, checks, defects, photos and 3D scans.
+- **A table per floor:** walls measured (bar), closure error (red above tolerance), openings placed of scheduled, points, defects, photos and 3D scans, and what is left to do. Tapping a room selects it.
+- **The clash list:** **Go** opens the room and wall concerned.
+
+The panel line shows "x/y rooms ready · n clashes".
+
+**Tests:**
+- `t37` covers:
+  - each rule;
+  - no false clashes on the example project;
+  - Checks integration;
+  - the dashboard rings, rows and clash list, and that Go opens the wall;
+  - the segment test.
+- Regression tests t7 and t17–t36 pass (`bw_main` 14.3292).
+
 ## 4. Excel workbook
 
 | Sheet | Contents |
