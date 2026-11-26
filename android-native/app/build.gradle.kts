@@ -43,8 +43,8 @@ android {
         applicationId = "io.github.thankids_sudo.laserplan"
         minSdk = 24
         targetSdk = 36
-        versionCode = (System.getenv("VERSION_CODE") ?: "1410").toInt()
-        versionName = System.getenv("VERSION_NAME") ?: "13.11"
+        versionCode = (System.getenv("VERSION_CODE") ?: "1430").toInt()
+        versionName = System.getenv("VERSION_NAME") ?: "13.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

@@ -619,6 +619,55 @@ The panel line shows "x/y rooms ready · n clashes".
   - the toggle hiding the markers.
 - The full suite t7, t17–t38 passes (`bw_main` 14.3292).
 
+## 3R. Version 18 (app 13.12): wall line – CL / Left / Right (drawing only)
+
+Each room has a **Wall line** setting that controls which side of the drawn line the wall thickness is shown:
+
+| Mode | Thickness drawn |
+|---|---|
+| **Auto** (default) | Closed room: outside the room, with the line as the measured inside face, as before. Open outline: to the left. |
+| **CL** | Centred on the line (half each side), for example when tracing a centre-line drawing. |
+| **Left / Right** | To the left or right of the direction the outline was drawn (C1 → C2 → …). |
+
+- **Where to set it.** Details → Room → *Wall line*, or the **Line:** button in the wall bar, which cycles Auto → CL → Left → Right.
+- **Mitred corners.** Each face runs to where it meets the neighbouring wall's same face, so bands no longer overlap or leave notches.
+- **Report and DXF.** The site-report plan uses the same mitred bands. The DXF now also draws the wall face lines on layer WALLS: the far face, or both faces with CL.
+- **Items on walls.** Openings, wall points and door swings follow the band.
+- **Quantities are unchanged.** Lengths, areas, the area statement and the estimate still treat the line as the measured face. Test `t39` checks that the quantity fingerprint is identical in all four modes.
+
+**Tests:**
+- `t39` covers:
+  - band offsets for every mode, the CL shift of openings and the 90° mitre;
+  - DXF face-line counts;
+  - the Room-tab buttons and the wall-bar cycle;
+  - the identical quantities.
+- The plan DXF was read back with ezdxf: 0 audit errors.
+- Full suite t7 and t17–t39 passes (`bw_main` 14.3292).
+
+## 3S. Version 19 (app 13.13): wall thickness, type and height when drawing
+
+In **Draw** mode a strip under the hint sets what the next walls get:
+- **Wall thickness:** chips for 115, 150, 200, 230, 300 and 345 mm, or a typed value from 50 to 1000 mm.
+- **Main / Partition:** with the thickness at the default, Partition uses the partition thickness from Building spec.
+- **Height:** the room height. Type it, or tap the box and shoot the meter with the rear edge on the floor, aimed at the ceiling.
+
+How changes apply:
+- **Walls and rooms drawn in this session** take the values. A thickness equal to the spec default is not stored on the wall, so later Building spec changes still apply.
+- **Changing the thickness** also updates the walls already drawn in the current room, including after you go back into Draw.
+- **Changing the height** updates the current room only if it was drawn in this session (or has no walls yet). Otherwise it is kept for the next room.
+- **Walls drawn earlier are never changed from here**; use Walls → Edit for those.
+- **The choices are saved with the project.** The strip hides in the other modes.
+
+**Tests:**
+- `t40` covers:
+  - showing and hiding the strip;
+  - thickness and height on a new room;
+  - thickness updates to walls just drawn, and no override stored at the default;
+  - partition, a typed thickness and the height from the laser;
+  - remembering the choices after a reload;
+  - older rooms untouched, and undo.
+- Full suite t7 and t17–t40 passes (`bw_main` 14.3292).
+
 ## 4. Excel workbook
 
 | Sheet | Contents |
